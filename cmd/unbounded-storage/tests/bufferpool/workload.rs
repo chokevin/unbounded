@@ -288,6 +288,7 @@ pub fn run_workload(seed: u64, w: Workload) -> Result<RunReport, RunError> {
         Pool::new(
             PoolConfig {
                 max_concurrent_streams: w.max_concurrent_streams,
+                ..PoolConfig::default()
             },
             backing,
             transport,

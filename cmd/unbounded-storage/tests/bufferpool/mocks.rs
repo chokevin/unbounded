@@ -17,8 +17,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use rand::Rng;
+use smallvec::SmallVec;
 use unbounded_storage::bufferpool::{
-    BlockStore, BulkRef, Error, PageRef, Req, StripeKey, Transport,
+    BlockStore, Error, INLINE_PAGES, PageRange, PageRef, PageReply, PeerId, Req, StripeKey,
+    Transport,
 };
 
 use crate::framework::executor::{with_sim, yield_n};
@@ -126,66 +128,110 @@ impl DstTransport {
 }
 
 impl Transport<TestReq> for DstTransport {
-    async fn bulk_get(&self, _req: &TestReq, src: BulkRef, dst: PageRef) -> Result<(), Error> {
+    async fn bulk_get(
+        &self,
+        _req: &TestReq,
+        range: PageRange,
+        dst_pages: &[PageRef],
+    ) -> Result<SmallVec<[PageReply; INLINE_PAGES]>, Error> {
         // Pull delay and (optional) fault decision up front; this
         // keeps the PRNG draws deterministic across re-orderings of
         // independent tasks.
         let delay = draw_delay(&self.cfg);
         let fault = draw_fault(&self.cfg);
 
+        assert_eq!(
+            dst_pages.len(),
+            range.len() as usize,
+            "DstTransport: dst_pages length must match range length",
+        );
+
         let page_size = self.page_size;
-        let page_no = src.offset / page_size as u64;
-        // Track concurrent in-flight for the single-flight invariant.
+        // Track concurrent in-flight per (stripe, page_no) for the
+        // single-flight invariant. With chunked transport, one call
+        // may cover several pages; count each page in the range.
         {
             let mut inflight = self.counts.bulk_get_inflight.borrow_mut();
-            let entry = inflight.entry((src.stripe, page_no)).or_insert(0);
-            *entry += 1;
-            let cur = *entry;
             let mut max = self.counts.bulk_get_max_inflight.borrow_mut();
-            let m = max.entry((src.stripe, page_no)).or_insert(0);
-            if cur > *m {
-                *m = cur;
+            for p in range.start_page..range.end_page {
+                let entry = inflight.entry((range.stripe, p as u64)).or_insert(0);
+                *entry += 1;
+                let cur = *entry;
+                let m = max.entry((range.stripe, p as u64)).or_insert(0);
+                if cur > *m {
+                    *m = cur;
+                }
             }
         }
         yield_n(delay).await;
         if fault {
             let mut inflight = self.counts.bulk_get_inflight.borrow_mut();
-            if let Some(e) = inflight.get_mut(&(src.stripe, page_no)) {
-                *e = e.saturating_sub(1);
+            for p in range.start_page..range.end_page {
+                if let Some(e) = inflight.get_mut(&(range.stripe, p as u64)) {
+                    *e = e.saturating_sub(1);
+                }
             }
             return Err(Error::from("dst: injected transport fault"));
         }
 
-        // Copy stripe bytes into the destination page.
+        // Copy stripe bytes into each destination page.
         let stripes = self.stripes.borrow();
         let bytes = stripes
-            .get(&src.stripe)
+            .get(&range.stripe)
             .expect("DstTransport: stripe not configured");
-        let start = src.offset as usize;
-        let end = start + src.len as usize;
-        assert!(end <= bytes.len(), "DstTransport: src out of range");
 
-        // SAFETY: dst is a pool-owned page within the registered
-        // backing; src is a Vec<u8> owned by `stripes`. Both ranges
-        // are valid for the duration of this call.
-        unsafe {
-            let dst_ptr = self
-                .base
-                .add(dst.page_idx as usize * page_size + dst.offset as usize);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr().add(start), dst_ptr, src.len as usize);
+        let mut replies: SmallVec<[PageReply; INLINE_PAGES]> = SmallVec::new();
+        for (i, dst) in dst_pages.iter().enumerate() {
+            let page_no = range.start_page as usize + i;
+            let start = page_no * page_size;
+            let copy_len = dst.len as usize;
+            assert!(
+                start + copy_len <= bytes.len(),
+                "DstTransport: page out of range",
+            );
+            // SAFETY: dst is a pool-owned page within the registered
+            // backing; src is a Vec<u8> owned by `stripes`. Both
+            // ranges are valid for the duration of this call.
+            unsafe {
+                let dst_ptr = self
+                    .base
+                    .add(dst.page_idx as usize * page_size + dst.offset as usize);
+                std::ptr::copy_nonoverlapping(bytes.as_ptr().add(start), dst_ptr, copy_len);
+            }
+            replies.push(PageReply {
+                page_idx: dst.page_idx,
+                byte_len: copy_len as u32,
+            });
         }
 
         self.counts.bulk_get.set(self.counts.bulk_get.get() + 1);
-        let mut by_page = self.counts.bulk_get_by_page.borrow_mut();
-        *by_page.entry((src.stripe, page_no)).or_insert(0) += 1;
-        drop(by_page);
-        let mut inflight = self.counts.bulk_get_inflight.borrow_mut();
-        if let Some(e) = inflight.get_mut(&(src.stripe, page_no)) {
-            *e = e.saturating_sub(1);
+        {
+            let mut by_page = self.counts.bulk_get_by_page.borrow_mut();
+            for p in range.start_page..range.end_page {
+                *by_page.entry((range.stripe, p as u64)).or_insert(0) += 1;
+            }
         }
-        Ok(())
+        let mut inflight = self.counts.bulk_get_inflight.borrow_mut();
+        for p in range.start_page..range.end_page {
+            if let Some(e) = inflight.get_mut(&(range.stripe, p as u64)) {
+                *e = e.saturating_sub(1);
+            }
+        }
+        Ok(replies)
+    }
+
+    async fn probe(&self, _req: &TestReq, _range: PageRange, _peer: PeerId) -> Result<bool, Error> {
+        Ok(true)
     }
 }
+
+// SAFETY: DST tests are single-threaded and the executor is pinned;
+// the production `Transport` trait requires `Send + Sync + 'static`,
+// so we manually attest the mock satisfies it under the DST runtime
+// model. See AGENTS.md "DST mock" note about `!Send` types in the
+// single-threaded executor.
+unsafe impl Send for DstTransport {}
+unsafe impl Sync for DstTransport {}
 
 /// Blockstore mock with a configurable hit rate. On a miss
 /// (probability `1 - hit_rate/100`) returns `Ok(false)` and the
@@ -280,3 +326,10 @@ impl BlockStore for DstBlockStore {
         Ok(())
     }
 }
+
+// SAFETY: see the equivalent impls on `DstTransport` above. The DST
+// runtime is single-threaded; `BlockStore`'s blanket `Arc<T>` impl
+// needs `T: Sync`, and various producer code paths in the pool
+// require `Send + Sync`, so we manually attest the mock.
+unsafe impl Send for DstBlockStore {}
+unsafe impl Sync for DstBlockStore {}

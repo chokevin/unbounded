@@ -5,26 +5,40 @@
 
 use std::sync::Arc;
 
+use smallvec::SmallVec;
+
 use crate::bufferpool::stream::ReadStream;
-use crate::bufferpool::types::{BulkRef, Error, PageRef, StripeKey};
+use crate::bufferpool::types::{
+    Error, INLINE_PAGES, PageRange, PageRef, PageReply, PeerId, StripeKey,
+};
 
 pub trait Req {
     fn key(&self) -> StripeKey;
 }
 
-pub trait Transport<R: Req> {
-    /// Fetch the byte range described by `src` from a peer derived
-    /// from `req` into the page identified by `dst.page_idx`.
-    /// Resolves when the data has landed in `dst`.
-    ///
-    /// The transport is constructed already aware of the pool's
-    /// pinned backing and page geometry: the embedder registers the
-    /// backing with whatever wire-side resource is needed (e.g. an
-    /// RDMA MR via `Class::register_backing`) before handing the
-    /// transport to `Pool::new`. The `Pool` calls only this method
-    /// at runtime.
-    async fn bulk_get(&self, req: &R, src: BulkRef, dst: PageRef) -> Result<(), Error>;
-    // TODO(jordan): Are both src and dst actually needed here?
+pub trait Transport<R>: Send + Sync + 'static
+where
+    R: Req + Send + Sync + 'static,
+{
+    /// Issue one chunk-sized bulk get. `dst_pages.len() == range.len() as usize`.
+    /// `dst_pages[i]` receives page `range.start_page + i`.
+    /// Returns one `PageReply` per page that was actually populated,
+    /// in any order.
+    fn bulk_get(
+        &self,
+        req: &R,
+        range: PageRange,
+        dst_pages: &[PageRef],
+    ) -> impl std::future::Future<Output = Result<SmallVec<[PageReply; INLINE_PAGES]>, Error>> + Send;
+
+    /// Cheap presence check against a specific peer. Returns true
+    /// iff that peer claims to own (or have cached) the full range.
+    fn probe(
+        &self,
+        req: &R,
+        range: PageRange,
+        peer: PeerId,
+    ) -> impl std::future::Future<Output = Result<bool, Error>> + Send;
 }
 
 pub trait BlockStore {

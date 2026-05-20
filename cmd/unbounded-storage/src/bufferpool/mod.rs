@@ -14,10 +14,11 @@ mod types;
 mod tests;
 
 pub use group::{PoolGroup, ShardDescriptor, ShardRouter};
-pub use null::NullBlockStore;
+pub use null::{NullBlockStore, NullTransport};
 pub use pool::Pool;
 pub use stream::{PageGuard, ReadStream};
 pub use traits::{BlockStore, BufferPool, Req, Transport};
 pub use types::{
-    Backing, BulkRef, Error, NodeId, PageRef, PeerId, PoolConfig, StripeKey, TraceCtx,
+    Backing, Error, INLINE_PAGES, NodeId, PAGES_PER_CHUNK, PageRange, PageRef, PageReply, PeerId,
+    PoolConfig, StripeKey, TraceCtx,
 };

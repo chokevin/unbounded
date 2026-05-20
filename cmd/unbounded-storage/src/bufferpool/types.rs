@@ -58,14 +58,34 @@ pub struct PageRef {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StripeKey(pub [u8; 32]);
 
-/// A byte range within a peer-side stripe, passed to
-/// `Transport::bulk_get`. `len` is bounded by `page_size`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct BulkRef {
+/// Half-open range of pages within one stripe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PageRange {
     pub stripe: StripeKey,
-    pub offset: u64,
-    pub len: u32,
+    pub start_page: u32,
+    pub end_page: u32, // exclusive
 }
+
+impl PageRange {
+    pub fn len(&self) -> u32 {
+        self.end_page - self.start_page
+    }
+    pub fn is_empty(&self) -> bool {
+        self.end_page <= self.start_page
+    }
+}
+
+/// What the transport actually delivered for one page in a range.
+#[derive(Clone, Copy, Debug)]
+pub struct PageReply {
+    pub page_idx: u32,
+    pub byte_len: u32,
+}
+
+/// Inline capacity for the `SmallVec<[PageReply; _]>` returned by
+/// `Transport::bulk_get`. One chunk's worth of page replies in the
+/// small case fits inline without heap allocation.
+pub const INLINE_PAGES: usize = 16;
 
 /// Opaque peer identifier minted by the p2p layer.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -79,6 +99,10 @@ pub struct NodeId(pub u64);
 #[derive(Clone, Debug, Default)]
 pub struct TraceCtx;
 
+/// Default chunk size in pages. At a 4 KiB page this is 2 MiB,
+/// which matches the design's "one Mercury bulk_get per chunk".
+pub const PAGES_PER_CHUNK: u32 = 512;
+
 /// Pool tunables. Most of the design's TODO knobs are still TBD;
 /// see `designs/bufferpool.md` "TODO(config)".
 #[derive(Clone, Debug)]
@@ -86,12 +110,32 @@ pub struct PoolConfig {
     /// Caps the number of concurrent `ReadStream`s the pool will
     /// admit. v1 enforces this only at `read()` time.
     pub max_concurrent_streams: usize,
+    /// Pages per Mercury `bulk_get` call. The pool splits any
+    /// fetched range into chunks aligned on this boundary; each
+    /// chunk becomes one `Transport::bulk_get`. Must be non-zero;
+    /// validated by [`PoolConfig::new`].
+    pub pages_per_chunk: u32,
+}
+
+impl PoolConfig {
+    /// Construct a `PoolConfig`, validating that `pages_per_chunk`
+    /// is non-zero. Returns [`Error::BadConfig`] otherwise.
+    pub fn new(max_concurrent_streams: usize, pages_per_chunk: u32) -> Result<Self, Error> {
+        if pages_per_chunk == 0 {
+            return Err(Error::BadConfig("pages_per_chunk must be non-zero"));
+        }
+        Ok(Self {
+            max_concurrent_streams,
+            pages_per_chunk,
+        })
+    }
 }
 
 impl Default for PoolConfig {
     fn default() -> Self {
         Self {
             max_concurrent_streams: 1024,
+            pages_per_chunk: PAGES_PER_CHUNK,
         }
     }
 }

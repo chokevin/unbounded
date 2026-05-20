@@ -1,17 +1,25 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Placeholder `BlockStore` for embedders that have no local cache
-//! tier yet. Every `read_page` reports a miss, so the pool always
-//! falls through to `Transport::bulk_get`; `write_page` is a no-op,
-//! so the tee silently drops bytes on the floor.
+//! Placeholder `BlockStore` and `Transport` for embedders that
+//! have no local cache tier or peer transport wired up yet. Every
+//! `BlockStore::read_page` reports a miss, so the pool always falls
+//! through to `Transport::bulk_get`; `write_page` is a no-op. The
+//! `NullTransport` reports every requested page as populated
+//! without ever touching the destination buffers, and `probe`
+//! always returns `Ok(true)`.
 //!
-//! This exists so the binary can construct a `Pool` per shard
-//! before a production blockstore lands. Replace with a real
-//! io_uring or NVMe-backed impl as soon as one is available.
+//! These exist so the binary can construct a `Pool` per shard
+//! before production implementations land. Replace with real
+//! io_uring / NVMe-backed and Mercury-backed impls as soon as
+//! they're available.
 
-use crate::bufferpool::traits::BlockStore;
-use crate::bufferpool::types::{Error, PageRef, StripeKey};
+use smallvec::SmallVec;
+
+use crate::bufferpool::traits::{BlockStore, Req, Transport};
+use crate::bufferpool::types::{
+    Error, INLINE_PAGES, PageRange, PageRef, PageReply, PeerId, StripeKey,
+};
 
 #[derive(Default)]
 pub struct NullBlockStore;
@@ -50,6 +58,52 @@ impl BlockStore for NullBlockStore {
     ) -> Result<(), Error> {
         // Drop the tee silently. A real blockstore will persist.
         Ok(())
+    }
+}
+
+/// Placeholder `Transport` that reports every requested page as
+/// populated without touching the destination buffers. Useful as a
+/// stand-in before a real peer transport (e.g. Mercury) is wired
+/// up. Returns one [`PageReply`] per requested page; `probe`
+/// always reports presence.
+pub struct NullTransport {
+    page_size: u32,
+}
+
+impl NullTransport {
+    pub fn new(page_size: u32) -> Self {
+        Self { page_size }
+    }
+}
+
+impl<R> Transport<R> for NullTransport
+where
+    R: Req + Send + Sync + 'static,
+{
+    async fn bulk_get(
+        &self,
+        _req: &R,
+        range: PageRange,
+        dst_pages: &[PageRef],
+    ) -> Result<SmallVec<[PageReply; INLINE_PAGES]>, Error> {
+        debug_assert_eq!(
+            dst_pages.len(),
+            range.len() as usize,
+            "NullTransport: dst_pages length must match range length",
+        );
+        let mut out: SmallVec<[PageReply; INLINE_PAGES]> = SmallVec::new();
+        for (i, dst) in dst_pages.iter().enumerate() {
+            out.push(PageReply {
+                page_idx: dst.page_idx,
+                byte_len: self.page_size,
+            });
+            let _ = i;
+        }
+        Ok(out)
+    }
+
+    async fn probe(&self, _req: &R, _range: PageRange, _peer: PeerId) -> Result<bool, Error> {
+        Ok(true)
     }
 }
 
@@ -98,5 +152,55 @@ mod tests {
     fn register_pages_accepts_anything() {
         let s = NullBlockStore::new();
         assert!(s.register_pages(std::ptr::null_mut(), 4096, 0).is_ok());
+    }
+
+    #[derive(Clone)]
+    struct K;
+    impl Req for K {
+        fn key(&self) -> StripeKey {
+            StripeKey([0; 32])
+        }
+    }
+
+    #[test]
+    fn transport_bulk_get_returns_one_reply_per_page() {
+        let t = NullTransport::new(4096);
+        let range = PageRange {
+            stripe: StripeKey([1; 32]),
+            start_page: 10,
+            end_page: 13,
+        };
+        let dst = vec![
+            PageRef {
+                page_idx: 100,
+                offset: 0,
+                len: 4096,
+            },
+            PageRef {
+                page_idx: 101,
+                offset: 0,
+                len: 4096,
+            },
+            PageRef {
+                page_idx: 102,
+                offset: 0,
+                len: 4096,
+            },
+        ];
+        let replies = block_on(Transport::<K>::bulk_get(&t, &K, range, &dst)).unwrap();
+        assert_eq!(replies.len(), 3);
+        assert_eq!(replies[0].page_idx, 100);
+        assert_eq!(replies[0].byte_len, 4096);
+    }
+
+    #[test]
+    fn transport_probe_reports_presence() {
+        let t = NullTransport::new(4096);
+        let range = PageRange {
+            stripe: StripeKey([1; 32]),
+            start_page: 0,
+            end_page: 1,
+        };
+        assert!(block_on(Transport::<K>::probe(&t, &K, range, PeerId(0))).unwrap());
     }
 }

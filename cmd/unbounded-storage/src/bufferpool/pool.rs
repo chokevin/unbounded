@@ -9,11 +9,15 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
+use smallvec::SmallVec;
+
 use crate::bufferpool::free_list::FreeList;
 use crate::bufferpool::inflight::{PageSlot, SlotState, StripeFetch};
 use crate::bufferpool::stream::{LocalBoxFuture, ReadStream, StreamSrc};
 use crate::bufferpool::traits::{BlockStore, BufferPool, Req, Transport};
-use crate::bufferpool::types::{Backing, BulkRef, Error, PageRef, PoolConfig, StripeKey};
+use crate::bufferpool::types::{
+    Backing, Error, INLINE_PAGES, PageRange, PageRef, PageReply, PoolConfig, StripeKey,
+};
 
 /// One per shard. Per the design's runtime model, a single `Pool`
 /// runs single-threaded inside its NUMA shard; the embedder pins
@@ -23,7 +27,7 @@ pub struct Pool<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     inner: Rc<PoolInner<T, S, R>>,
 }
@@ -32,7 +36,7 @@ pub(super) struct PoolInner<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     pub(super) cfg: PoolConfig,
     pub(super) backing: Backing,
@@ -49,7 +53,7 @@ impl<T, S, R> Pool<T, S, R>
 where
     T: Transport<R> + 'static,
     S: BlockStore + 'static,
-    R: Req + 'static,
+    R: Req + Send + Sync + 'static,
 {
     /// One per NUMA shard. Carves `backing` into pages and calls
     /// `blockstore.register_pages(...)` exactly once. The
@@ -79,6 +83,9 @@ where
         }
         if backing.base.is_null() {
             return Err(Error::BadConfig("backing.base is null"));
+        }
+        if cfg.pages_per_chunk == 0 {
+            return Err(Error::BadConfig("pages_per_chunk must be non-zero"));
         }
 
         blockstore.register_pages(backing.base, backing.page_size, backing.page_count)?;
@@ -110,13 +117,28 @@ where
     pub fn inflight_entries(&self) -> usize {
         self.inner.inflight.borrow().len()
     }
+
+    /// Test-only: drive a chunk-bounded range fetch directly. Used
+    /// by the bufferpool unit tests to assert the splitter calls
+    /// `Transport::bulk_get` once per chunk with the expected
+    /// `PageRange`. Not part of the public surface; the embedder
+    /// goes through `BufferPool::read`.
+    #[cfg(test)]
+    pub(crate) async fn fetch_range_for_test(
+        &self,
+        req: &R,
+        range: PageRange,
+        dst_pages: &[PageRef],
+    ) -> Result<(), Error> {
+        fetch_range_via_transport(&self.inner, req, range, dst_pages).await
+    }
 }
 
 impl<T, S, R> BufferPool for Pool<T, S, R>
 where
     T: Transport<R> + 'static,
     S: BlockStore + 'static,
-    R: Req + 'static,
+    R: Req + Send + Sync + 'static,
 {
     type Req = R;
 
@@ -157,7 +179,7 @@ pub(super) struct StreamSrcImpl<'p, T, S, R>
 where
     T: Transport<R> + 'static,
     S: BlockStore + 'static,
-    R: Req + 'static,
+    R: Req + Send + Sync + 'static,
 {
     inner: Rc<PoolInner<T, S, R>>,
     req: &'p R,
@@ -176,7 +198,7 @@ impl<'p, T, S, R> StreamSrcImpl<'p, T, S, R>
 where
     T: Transport<R> + 'static,
     S: BlockStore + 'static,
-    R: Req + 'static,
+    R: Req + Send + Sync + 'static,
 {
     pub(super) fn new(
         inner: Rc<PoolInner<T, S, R>>,
@@ -198,7 +220,7 @@ impl<'p, T, S, R> StreamSrc for StreamSrcImpl<'p, T, S, R>
 where
     T: Transport<R> + 'static,
     S: BlockStore + 'static,
-    R: Req + 'static,
+    R: Req + Send + Sync + 'static,
 {
     fn page_size(&self) -> usize {
         self.inner.page_size
@@ -248,7 +270,7 @@ fn release_guard<T, S, R>(
 ) where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     let slot = match fetch.borrow().pages.get(&page_no).cloned() {
         Some(s) => s,
@@ -274,7 +296,7 @@ struct ConsumerHold<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     inner: Rc<PoolInner<T, S, R>>,
     fetch: Rc<RefCell<StripeFetch>>,
@@ -288,7 +310,7 @@ impl<T, S, R> ConsumerHold<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     fn new(
         inner: Rc<PoolInner<T, S, R>>,
@@ -320,7 +342,7 @@ impl<T, S, R> Drop for ConsumerHold<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     fn drop(&mut self) {
         if !self.active {
@@ -346,7 +368,7 @@ fn recycle_if_terminal<T, S, R>(
 ) where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     if !(slot.is_recyclable() && slot_is_terminal(slot)) {
         return;
@@ -382,7 +404,7 @@ fn decrement_stream<T, S, R>(
 ) where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     let to_release: Vec<u32> = {
         let mut f = fetch.borrow_mut();
@@ -440,7 +462,7 @@ async fn fetch_page<T, S, R>(
 where
     T: Transport<R> + 'static,
     S: BlockStore + 'static,
-    R: Req + 'static,
+    R: Req + Send + Sync + 'static,
 {
     let slot: Rc<PageSlot> = {
         let mut f = fetch.borrow_mut();
@@ -531,12 +553,15 @@ where
                 let fetch_result: Result<bool, Error> = async {
                     let hit = inner.blockstore.read_page(key, stripe_off, dst).await?;
                     if !hit {
-                        let bulk = BulkRef {
+                        let start_page: u32 =
+                            page_no.try_into().map_err(|_| Error::OffsetOutOfRange)?;
+                        let range = PageRange {
                             stripe: key,
-                            offset: stripe_off,
-                            len: inner.page_size as u32,
+                            start_page,
+                            end_page: start_page + 1,
                         };
-                        inner.transport.bulk_get(req, bulk, dst).await?;
+                        fetch_range_via_transport(&inner, req, range, std::slice::from_ref(&dst))
+                            .await?;
                     }
                     Ok(hit)
                 }
@@ -654,7 +679,7 @@ struct ParkOnSlot<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     inner: Rc<PoolInner<T, S, R>>,
     fetch: Rc<RefCell<StripeFetch>>,
@@ -672,7 +697,7 @@ enum ParkOutcome<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     /// Slot reached `Ready`. The caller must `forget()` the hold so
     /// the bump survives to be balanced by the consumer's
@@ -688,7 +713,7 @@ impl<T, S, R> ParkOnSlot<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     fn new(
         inner: Rc<PoolInner<T, S, R>>,
@@ -712,7 +737,7 @@ impl<T, S, R> Future for ParkOnSlot<T, S, R>
 where
     T: Transport<R>,
     S: BlockStore,
-    R: Req,
+    R: Req + Send + Sync + 'static,
 {
     type Output = ParkOutcome<T, S, R>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -773,4 +798,148 @@ enum Outcome {
     Ready,
     Error(Error),
     Retry,
+}
+
+// ---------------------------------------------------------------------------
+// Chunk splitter + range-fetch helper.
+// ---------------------------------------------------------------------------
+
+/// Split `range` into chunk-aligned sub-ranges of at most
+/// `pages_per_chunk` pages each. The first chunk may be shorter
+/// than `pages_per_chunk` if `range.start_page` does not land on a
+/// chunk boundary; subsequent chunks align on multiples of
+/// `pages_per_chunk` until the last (possibly short) chunk reaches
+/// `range.end_page`.
+///
+/// Panics if `pages_per_chunk == 0`; callers in this crate go
+/// through `PoolConfig` which rejects that at construction.
+pub(crate) fn split_into_chunks(range: PageRange, pages_per_chunk: u32) -> Vec<PageRange> {
+    assert!(pages_per_chunk > 0, "pages_per_chunk must be non-zero");
+    let mut out = Vec::new();
+    if range.is_empty() {
+        return out;
+    }
+    let mut cur = range.start_page;
+    while cur < range.end_page {
+        // End of the current chunk: either the next chunk boundary
+        // or the end of the requested range, whichever comes first.
+        let next_boundary = (cur / pages_per_chunk + 1) * pages_per_chunk;
+        let end = next_boundary.min(range.end_page);
+        out.push(PageRange {
+            stripe: range.stripe,
+            start_page: cur,
+            end_page: end,
+        });
+        cur = end;
+    }
+    out
+}
+
+/// Fetch `range` from the transport in chunk-aligned pieces. The
+/// caller supplies one `PageRef` per page in `range`, ordered by
+/// ascending `page_no`. Partial replies are treated as failures
+/// for v1 (see `designs/bufferpool.md` TODO(partial-failure)).
+pub(crate) async fn fetch_range_via_transport<T, S, R>(
+    inner: &Rc<PoolInner<T, S, R>>,
+    req: &R,
+    range: PageRange,
+    dst_pages: &[PageRef],
+) -> Result<(), Error>
+where
+    T: Transport<R>,
+    S: BlockStore,
+    R: Req + Send + Sync + 'static,
+{
+    assert_eq!(
+        dst_pages.len(),
+        range.len() as usize,
+        "fetch_range_via_transport: dst_pages length must match range length",
+    );
+    let chunks = split_into_chunks(range, inner.cfg.pages_per_chunk);
+    let mut offset_in_range: u32 = 0;
+    for chunk in chunks {
+        let chunk_len = chunk.len() as usize;
+        let slice_start = offset_in_range as usize;
+        let slice_end = slice_start + chunk_len;
+        let chunk_dst = &dst_pages[slice_start..slice_end];
+        let replies: SmallVec<[PageReply; INLINE_PAGES]> =
+            inner.transport.bulk_get(req, chunk, chunk_dst).await?;
+        if replies.len() < chunk_len {
+            return Err(Error::Io(0));
+        }
+        offset_in_range += chunk.len();
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bufferpool::types::StripeKey;
+
+    fn stripe() -> StripeKey {
+        StripeKey([7u8; 32])
+    }
+
+    #[test]
+    fn splitter_single_chunk_when_aligned_and_small() {
+        let r = PageRange {
+            stripe: stripe(),
+            start_page: 0,
+            end_page: 5,
+        };
+        let chunks = split_into_chunks(r, 512);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], r);
+    }
+
+    #[test]
+    fn splitter_spans_two_chunks_across_boundary() {
+        let r = PageRange {
+            stripe: stripe(),
+            start_page: 500,
+            end_page: 530,
+        };
+        let chunks = split_into_chunks(r, 512);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].start_page, 500);
+        assert_eq!(chunks[0].end_page, 512);
+        assert_eq!(chunks[1].start_page, 512);
+        assert_eq!(chunks[1].end_page, 530);
+    }
+
+    #[test]
+    fn splitter_spans_three_chunks() {
+        let r = PageRange {
+            stripe: stripe(),
+            start_page: 500,
+            end_page: 1100,
+        };
+        let chunks = split_into_chunks(r, 512);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!((chunks[0].start_page, chunks[0].end_page), (500, 512));
+        assert_eq!((chunks[1].start_page, chunks[1].end_page), (512, 1024));
+        assert_eq!((chunks[2].start_page, chunks[2].end_page), (1024, 1100));
+    }
+
+    #[test]
+    fn splitter_empty_range_yields_nothing() {
+        let r = PageRange {
+            stripe: stripe(),
+            start_page: 10,
+            end_page: 10,
+        };
+        assert!(split_into_chunks(r, 4).is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "pages_per_chunk must be non-zero")]
+    fn splitter_panics_on_zero_chunk_size() {
+        let r = PageRange {
+            stripe: stripe(),
+            start_page: 0,
+            end_page: 1,
+        };
+        let _ = split_into_chunks(r, 0);
+    }
 }

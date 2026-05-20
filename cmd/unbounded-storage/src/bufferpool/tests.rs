@@ -14,9 +14,10 @@ use std::rc::Rc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::bufferpool::{
-    Backing, BlockStore, BufferPool, BulkRef, Error, PageRef, Pool, PoolConfig, Req, StripeKey,
-    Transport,
+    Backing, BlockStore, BufferPool, Error, INLINE_PAGES, PageRange, PageRef, PageReply, Pool,
+    PoolConfig, Req, StripeKey, Transport,
 };
+use smallvec::SmallVec;
 
 // ---------------------------------------------------------------------------
 // Tiny single-thread executor.
@@ -139,6 +140,10 @@ struct MockTransport {
     stripes: RefCell<HashMap<StripeKey, Vec<u8>>>,
     /// Number of `bulk_get` calls completed.
     calls: RefCell<u32>,
+    /// `PageRange`s observed by `bulk_get`, in call order. Used by
+    /// the chunk-splitter test to assert one call per chunk with
+    /// the expected boundaries.
+    seen_ranges: RefCell<Vec<PageRange>>,
     /// Pending `bulk_get`s pend this many polls before completing.
     pend_polls: RefCell<usize>,
     /// Force `bulk_get` to return an error instead of completing.
@@ -154,6 +159,7 @@ impl MockTransport {
         Self {
             stripes: RefCell::new(HashMap::new()),
             calls: RefCell::new(0),
+            seen_ranges: RefCell::new(Vec::new()),
             pend_polls: RefCell::new(0),
             error_mode: RefCell::new(false),
             base,
@@ -169,6 +175,10 @@ impl MockTransport {
         *self.calls.borrow()
     }
 
+    fn seen_ranges(&self) -> Vec<PageRange> {
+        self.seen_ranges.borrow().clone()
+    }
+
     fn set_pend_polls(&self, n: usize) {
         *self.pend_polls.borrow_mut() = n;
     }
@@ -179,37 +189,74 @@ impl MockTransport {
 }
 
 impl Transport<TestReq> for MockTransport {
-    async fn bulk_get(&self, _req: &TestReq, src: BulkRef, dst: PageRef) -> Result<(), Error> {
+    async fn bulk_get(
+        &self,
+        _req: &TestReq,
+        range: PageRange,
+        dst_pages: &[PageRef],
+    ) -> Result<SmallVec<[PageReply; INLINE_PAGES]>, Error> {
         // Pend the configured number of polls (one polling round
-        // per pend, decremented on each call).
-        for _ in 0..*self.pend_polls.borrow() {
+        // per pend, decremented on each call). Read the count and
+        // drop the borrow before awaiting so the future stays Send.
+        let pend_polls = *self.pend_polls.borrow();
+        for _ in 0..pend_polls {
             PendOnce { fired: false }.await;
         }
         *self.pend_polls.borrow_mut() = 0;
 
-        if *self.error_mode.borrow() {
+        let error_mode = *self.error_mode.borrow();
+        if error_mode {
             return Err(Error::from("forced error"));
         }
 
-        let stripes = self.stripes.borrow();
-        let bytes = stripes.get(&src.stripe).expect("stripe not configured");
-        let start = src.offset as usize;
-        let end = start + src.len as usize;
-        assert!(end <= bytes.len(), "src out of range");
+        assert_eq!(
+            dst_pages.len(),
+            range.len() as usize,
+            "MockTransport: dst_pages must match range length",
+        );
+        self.seen_ranges.borrow_mut().push(range);
 
+        let stripes = self.stripes.borrow();
+        let bytes = stripes.get(&range.stripe).expect("stripe not configured");
         let page_size = self.page_size;
-        let dst_ptr = unsafe {
-            self.base
-                .add(dst.page_idx as usize * page_size + dst.offset as usize)
-        };
-        // SAFETY: dst is a pool page, src is a Vec<u8>, both valid.
-        unsafe {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr().add(start), dst_ptr, src.len as usize);
+        let mut out: SmallVec<[PageReply; INLINE_PAGES]> = SmallVec::new();
+        for (i, dst) in dst_pages.iter().enumerate() {
+            let page_no = range.start_page as usize + i;
+            let start = page_no * page_size;
+            let copy_len = dst.len as usize;
+            assert!(start + copy_len <= bytes.len(), "src out of range");
+            let dst_ptr = unsafe {
+                self.base
+                    .add(dst.page_idx as usize * page_size + dst.offset as usize)
+            };
+            // SAFETY: dst is a pool page, src is a Vec<u8>, both valid.
+            unsafe {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr().add(start), dst_ptr, copy_len);
+            }
+            out.push(PageReply {
+                page_idx: dst.page_idx,
+                byte_len: copy_len as u32,
+            });
         }
         *self.calls.borrow_mut() += 1;
-        Ok(())
+        Ok(out)
+    }
+
+    async fn probe(
+        &self,
+        _req: &TestReq,
+        _range: PageRange,
+        _peer: crate::bufferpool::PeerId,
+    ) -> Result<bool, Error> {
+        Ok(true)
     }
 }
+
+// SAFETY: tests are single-threaded; the `Transport` trait requires
+// `Send + Sync + 'static` so we manually attest the mock satisfies
+// it under the test runtime model.
+unsafe impl Send for MockTransport {}
+unsafe impl Sync for MockTransport {}
 
 // ---------------------------------------------------------------------------
 // Mock blockstore.
@@ -349,9 +396,32 @@ fn key(b: u8) -> StripeKey {
 struct TransportRc(Rc<MockTransport>);
 struct BlockStoreRc(Rc<MockBlockStore>);
 
+// SAFETY: tests are single-threaded; the `Transport` and
+// `BlockStore` traits require `Send + Sync + 'static` (and the
+// `BlockStore` blanket impl over `Arc<T>` needs `T: Sync` to be
+// useful), so we manually attest these test adapters satisfy them.
+unsafe impl Send for TransportRc {}
+unsafe impl Sync for TransportRc {}
+unsafe impl Send for BlockStoreRc {}
+unsafe impl Sync for BlockStoreRc {}
+
 impl Transport<TestReq> for TransportRc {
-    async fn bulk_get(&self, req: &TestReq, src: BulkRef, dst: PageRef) -> Result<(), Error> {
-        self.0.bulk_get(req, src, dst).await
+    async fn bulk_get(
+        &self,
+        req: &TestReq,
+        range: PageRange,
+        dst_pages: &[PageRef],
+    ) -> Result<SmallVec<[PageReply; INLINE_PAGES]>, Error> {
+        self.0.bulk_get(req, range, dst_pages).await
+    }
+
+    async fn probe(
+        &self,
+        req: &TestReq,
+        range: PageRange,
+        peer: crate::bufferpool::PeerId,
+    ) -> Result<bool, Error> {
+        self.0.probe(req, range, peer).await
     }
 }
 
@@ -390,6 +460,18 @@ fn make_pool_v2(
     Rc<MockTransport>,
     Rc<MockBlockStore>,
 ) {
+    make_pool_with_cfg(page_size, page_count, PoolConfig::default())
+}
+
+fn make_pool_with_cfg(
+    page_size: usize,
+    page_count: usize,
+    cfg: PoolConfig,
+) -> (
+    Pool<TransportRc, BlockStoreRc, TestReq>,
+    Rc<MockTransport>,
+    Rc<MockBlockStore>,
+) {
     let backing = heap_backing(page_size, page_count);
     // `Transport` is now constructed already aware of the backing's
     // base/page_size (embedder pre-registration model); `BlockStore`
@@ -397,7 +479,7 @@ fn make_pool_v2(
     let t = Rc::new(MockTransport::new(backing.base, backing.page_size));
     let s = Rc::new(MockBlockStore::new());
     let pool = Pool::new(
-        PoolConfig::default(),
+        cfg,
         backing,
         TransportRc(t.clone()),
         BlockStoreRc(s.clone()),
@@ -681,6 +763,7 @@ fn stream_limit_enforced() {
     s.preload(key(0), 0, vec![0u8; P]);
     let cfg = PoolConfig {
         max_concurrent_streams: 1,
+        ..PoolConfig::default()
     };
     let pool = Pool::new(
         cfg,
@@ -893,4 +976,70 @@ fn leader_drop_during_tee_releases_page() {
     assert_eq!(transport.calls(), 1);
     // write_page never completed (best-effort tee).
     assert_eq!(store.writes(), 0);
+}
+
+#[test]
+fn chunk_splitter_issues_one_bulk_get_per_chunk() {
+    // pages_per_chunk=4 with a 10-page range starting at page 2 must
+    // split into 3 chunks: [2,4), [4,8), [8,12). Drive the splitter
+    // directly via the pool's test-only range fetcher.
+    const P: usize = 256;
+    let cfg = PoolConfig {
+        max_concurrent_streams: 1024,
+        pages_per_chunk: 4,
+    };
+    let (pool, transport, _store) = make_pool_with_cfg(P, 16, cfg);
+    let k = key(0xF0);
+    let stripe_len = 16 * P;
+    let mut stripe = vec![0u8; stripe_len];
+    for (i, b) in stripe.iter_mut().enumerate() {
+        *b = (i & 0xff) as u8;
+    }
+    transport.put_stripe(k, stripe);
+
+    let req = TestReq { key: k };
+    // 10 destination pages backed by pool page indices 0..10.
+    let dst: Vec<PageRef> = (0..10u32)
+        .map(|pi| PageRef {
+            page_idx: pi,
+            offset: 0,
+            len: P as u32,
+        })
+        .collect();
+    let range = PageRange {
+        stripe: k,
+        start_page: 2,
+        end_page: 12,
+    };
+    block_on(async {
+        pool.fetch_range_for_test(&req, range, &dst).await.unwrap();
+    });
+
+    let seen = transport.seen_ranges();
+    assert_eq!(seen.len(), 3, "expected 3 chunks, got {:?}", seen);
+    assert_eq!(
+        seen[0],
+        PageRange {
+            stripe: k,
+            start_page: 2,
+            end_page: 4
+        },
+    );
+    assert_eq!(
+        seen[1],
+        PageRange {
+            stripe: k,
+            start_page: 4,
+            end_page: 8
+        },
+    );
+    assert_eq!(
+        seen[2],
+        PageRange {
+            stripe: k,
+            start_page: 8,
+            end_page: 12
+        },
+    );
+    assert_eq!(transport.calls(), 3);
 }

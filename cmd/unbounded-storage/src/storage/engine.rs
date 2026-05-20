@@ -29,7 +29,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use crate::bufferpool::{self, BulkRef, PageRef, StripeKey};
+use crate::bufferpool::{self, PageRef, StripeKey};
 use crate::storage::admission::AdmissionFilter;
 use crate::storage::alloc::Allocator;
 use crate::storage::blockdev::BlockDevice;
@@ -712,7 +712,7 @@ impl<B: BlockDevice> StorageEngine<B> {
 // referenced by the bufferpool crate's import statement; pull it
 // in here so the symbol is reachable from the module tree.
 #[allow(dead_code)]
-fn _unused_bulkref() -> Option<BulkRef> {
+fn _unused_bulkref() -> Option<()> {
     None
 }
 
