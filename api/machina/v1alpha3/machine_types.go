@@ -383,6 +383,7 @@ type RedfishSpec struct {
 }
 
 // PXESpec defines PXE boot configuration for a Machine.
+// +kubebuilder:validation:XValidation:rule="!has(self.bootProtocol) || self.bootProtocol != 'VirtualMedia' || has(self.redfish)",message="VirtualMedia requires redfish"
 type PXESpec struct {
 	// Image is an OCI image reference containing the machine disk image.
 	// The image must contain /disk/disk.img.gz.
@@ -420,7 +421,8 @@ type PXESpec struct {
 	// BootProtocol selects how metalman should trigger network boot for
 	// repaves. PXE uses DHCP/TFTP bootfile options. HTTP uses Redfish UEFI
 	// HTTP boot with a URL derived from the netboot image metadata.
-	// +kubebuilder:validation:Enum=PXE;HTTP
+	// VirtualMedia mounts an operation-owned bootstrap ISO through Redfish.
+	// +kubebuilder:validation:Enum=PXE;HTTP;VirtualMedia
 	// +kubebuilder:default=PXE
 	// +optional
 	BootProtocol string `json:"bootProtocol,omitempty"`
@@ -452,6 +454,8 @@ const (
 	PXEBootProtocolPXE = "PXE"
 	// PXEBootProtocolHTTP uses Redfish UEFI HTTP boot.
 	PXEBootProtocolHTTP = "HTTP"
+	// PXEBootProtocolVirtualMedia uses a Redfish-mounted bootstrap ISO.
+	PXEBootProtocolVirtualMedia = "VirtualMedia"
 	// PXEArchitectureAMD64 is the x86_64 target architecture for PXE boot.
 	PXEArchitectureAMD64 = "amd64"
 	// PXEArchitectureARM64 is the aarch64 target architecture for PXE boot.
