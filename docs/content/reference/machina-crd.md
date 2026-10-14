@@ -255,7 +255,7 @@ after a controller restart. Each entry includes:
 |-------|------|-------------|
 | `machineRef` | string | Target Machine name. |
 | `phase` | string | Target phase: `Pending`, `InProgress`, `Complete`, or `Failed`. |
-| `stage` | string | Target operation stage such as `WaitingOff`, `WaitingOn`, or `WaitingRepave`. |
+| `stage` | string | Target operation stage such as `WaitingOff`, `WaitingOn`, `WaitingBootLoader`, or `WaitingRepave`. |
 | `message` | string | Human-readable target progress or failure message. |
 | `startedAt` | time | Target start timestamp. |
 | `completedAt` | time | Target terminal timestamp. |
@@ -273,6 +273,13 @@ and the drive unmounted. `/ready` saves
 `rebootRequestedAt` before returning success. Rack deletion (`stagedDeleted`) and
 local release (`released`) are separate; failed deletion retains ownership without
 blocking a safe reboot.
+
+For Rack-SCM virtual media, metalman verifies `UEFI` plus `RemoteDrive` before
+power-on and records sanitized pre- and post-power-on readbacks in
+`bootMedia.prePowerOnBootConfig` and `bootMedia.postPowerOnBootConfig`. The
+persisted `bootLoaderDeadline` bounds the `WaitingBootLoader` stage across
+controller restarts. The target enters the long installer image-write wait only
+after the capability-scoped GRUB request records `loaderStartedAt`.
 
 The installer retries bounded `curl` requests in RAM until acknowledged, without
 reinstalling or rebooting early. Frozen netboot inputs remain in use despite Machine

@@ -75,9 +75,10 @@ const (
 type BootTarget string
 
 const (
-	BootTargetPxe      BootTarget = "Pxe"
-	BootTargetHdd      BootTarget = "Hdd"
-	BootTargetUefiHTTP BootTarget = "UefiHttp"
+	BootTargetPxe         BootTarget = "Pxe"
+	BootTargetHdd         BootTarget = "Hdd"
+	BootTargetRemoteDrive BootTarget = "RemoteDrive"
+	BootTargetUefiHTTP    BootTarget = "UefiHttp"
 )
 
 // BootEnabled represents a Redfish boot source override enabled mode.

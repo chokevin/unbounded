@@ -232,7 +232,7 @@ func (c *Client) rackBootConfig(ctx context.Context) (BootConfig, error) {
 	}
 
 	switch result.Boot.Target {
-	case "None", BootTargetPxe, BootTargetHdd, "RemoteDrive", "BiosSetup":
+	case "None", BootTargetPxe, BootTargetHdd, BootTargetRemoteDrive, "BiosSetup":
 	default:
 		return BootConfig{}, fmt.Errorf("invalid blade boot target %q", result.Boot.Target)
 	}

@@ -4,6 +4,7 @@
 package netboot
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -11,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,6 +30,69 @@ import (
 	v1alpha3 "github.com/Azure/unbounded/api/machina/v1alpha3"
 	"github.com/Azure/unbounded/internal/metalman/indexing"
 )
+
+func TestBootMediaCallbackLogsRedactCapability(t *testing.T) {
+	id := strings.Repeat("c", 32)
+	ref := "test/netboot@sha256:" + strings.Repeat("a", 64)
+	cache := NewOCICache(t.TempDir())
+	require.NoError(t, populateOCICacheForArchitecture(cache.CacheDir, strings.Repeat("a", 64), "amd64", map[string][]byte{
+		"metadata.yaml":      []byte("mediaFormat: unbounded-uefi-v1\nmediaShim: shimx64.efi\nmediaGrub: grubx64.efi\n"),
+		"shimx64.efi":        []byte("shim"),
+		"grubx64.efi":        []byte("grub"),
+		"grub/grub.cfg.tmpl": []byte("halt\n"),
+	}))
+	cache.SetDigestForArchitecture(ref, "amd64", "sha256:"+strings.Repeat("a", 64))
+	netboot := &v1alpha3.PXESpec{
+		Image: "test/disk@sha256:" + strings.Repeat("b", 64), NetbootImage: ref, Architecture: "amd64",
+		BootProtocol: "VirtualMedia",
+		DHCPLeases: []v1alpha3.DHCPLease{{
+			MAC: "02:11:22:33:44:55", IPv4: "192.0.2.20", SubnetMask: "255.255.255.0", Gateway: "192.0.2.1",
+		}},
+	}
+	machine := &v1alpha3.Machine{ObjectMeta: metav1.ObjectMeta{Name: "host", UID: "host-uid"}, Spec: v1alpha3.MachineSpec{
+		Host: &v1alpha3.HostSpec{Netboot: netboot},
+	}}
+	op := &v1alpha3.MachineOperation{
+		ObjectMeta: metav1.ObjectMeta{Name: "replace", UID: "op-uid"},
+		Spec:       v1alpha3.MachineOperationSpec{OperationKind: v1alpha3.OperationHostReplace},
+		Status: v1alpha3.MachineOperationStatus{Targets: []v1alpha3.MachineOperationTargetStatus{{
+			MachineRef: machine.Name,
+			BootMedia: &v1alpha3.MachineOperationBootMediaStatus{
+				ID: id, MachineUID: machine.UID, Netboot: netboot.DeepCopy(), Phase: "WaitingBootLoader",
+			},
+		}}},
+	}
+	fc := fake.NewClientBuilder().WithScheme(newScheme(t)).WithStatusSubresource(op).WithObjects(machine, op).Build()
+	p := &MediaProvider{
+		Resolver: &FileResolver{Cache: cache, Reader: fc, ServeURL: "http://192.0.2.2:8080"},
+		Client:   fc, CacheDir: cache.CacheDir, TFTPServer: "192.0.2.2",
+	}
+
+	var logs bytes.Buffer
+
+	previous, logger := slog.Default(), slog.New(slog.NewTextHandler(&logs, nil))
+
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	request := func(id, remote string) {
+		req := httptest.NewRequest(http.MethodGet, "/bootmedia/"+id+"/grub.cfg", nil)
+		req.RemoteAddr = remote
+		p.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	request(id, "192.0.2.99:1234")
+	request(strings.Repeat("d", 32), "192.0.2.20:1234")
+	request(id, "192.0.2.20:1234")
+
+	output := logs.String()
+	require.Contains(t, output, "reason=unexpected_source")
+	require.Contains(t, output, "reason=owner_not_found")
+	require.Contains(t, output, "source=192.0.2.20")
+	require.Contains(t, output, "artifact=grub.cfg")
+	require.NotContains(t, output, id)
+	require.NotContains(t, output, strings.Repeat("d", 32))
+}
 
 func TestMediaReleasedHistorySuccessorPrecedence(t *testing.T) {
 	for _, protocol := range []string{v1alpha3.PXEBootProtocolPXE, v1alpha3.PXEBootProtocolHTTP} {

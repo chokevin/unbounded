@@ -267,6 +267,12 @@ spec:
                             to boot the media.
                           format: int32
                           type: integer
+                        bootLoaderDeadline:
+                          description: |-
+                            BootLoaderDeadline is the persisted deadline for the first authorized
+                            bootloader request after power-on.
+                          format: date-time
+                          type: string
                         certFingerprint:
                           type: string
                         cleaned:
@@ -494,6 +500,40 @@ spec:
                             spending retry attempts.
                           format: date-time
                           type: string
+                        postPowerOnBootConfig:
+                          description: |-
+                            PostPowerOnBootConfig records the sanitized Rack-SCM boot configuration
+                            observed after the host reports PowerState=On.
+                          properties:
+                            mode:
+                              type: string
+                            observedAt:
+                              format: date-time
+                              type: string
+                            target:
+                              type: string
+                          required:
+                          - mode
+                          - observedAt
+                          - target
+                          type: object
+                        prePowerOnBootConfig:
+                          description: |-
+                            PrePowerOnBootConfig records the sanitized Rack-SCM boot configuration
+                            verified immediately before power-on.
+                          properties:
+                            mode:
+                              type: string
+                            observedAt:
+                              format: date-time
+                              type: string
+                            target:
+                              type: string
+                          required:
+                          - mode
+                          - observedAt
+                          - target
+                          type: object
                         readinessStartedAt:
                           description: ReadinessStartedAt gives AC recovery one fixed
                             grace window per phase.

@@ -142,16 +142,24 @@ func (p *MediaProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, action := parts[0], parts[1]
-	log := slog.With("handler", "bootmedia", "action", action, "remote", r.RemoteAddr)
+
+	source, _, sourceErr := net.SplitHostPort(r.RemoteAddr)
+	if sourceErr != nil {
+		source = "invalid"
+	}
+
+	log := slog.With("handler", "bootmedia", "action", action, "source", source)
 
 	if (action == "complete" && r.Method != http.MethodPost) || (action != "complete" && r.Method != http.MethodGet) {
+		log.Warn("rejecting boot media callback", "reason", "method_not_allowed")
 		w.WriteHeader(http.StatusMethodNotAllowed)
+
 		return
 	}
 
 	o, err := p.callbackOwner(r.Context(), id)
 	if err != nil {
-		log.Warn("rejecting boot media request without an owner", "err", err)
+		log.Warn("rejecting boot media callback", "reason", "owner_not_found", "err", err)
 		http.NotFound(w, r)
 
 		return
@@ -159,9 +167,8 @@ func (p *MediaProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log = log.With("operation", o.op.Name, "machine", o.status().MachineUID)
 
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil || validateMediaLease(o.status().Netboot) != nil || ip != o.status().Netboot.DHCPLeases[0].IPv4 {
-		log.Warn("rejecting boot media request from an unexpected source")
+	if sourceErr != nil || validateMediaLease(o.status().Netboot) != nil || source != o.status().Netboot.DHCPLeases[0].IPv4 {
+		log.Warn("rejecting boot media callback", "reason", "unexpected_source")
 		http.NotFound(w, r)
 
 		return
@@ -179,7 +186,8 @@ func (p *MediaProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if phase := o.status().Phase; phase != "PoweringOn" && phase != "Installing" {
+		if phase := o.status().Phase; phase != "PoweringOn" && phase != "VerifyingBootAfterPowerOn" &&
+			phase != "WaitingBootLoader" && phase != "Installing" {
 			// The controller may be power cycling the host for a boot retry.
 			log.Info("serving halt config while the host is not expected to boot", "phase", phase)
 			w.Header().Set("Content-Type", "text/plain")
@@ -213,7 +221,7 @@ func (p *MediaProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		log.Info("serving boot media installer config")
+		log.Info("serving boot media installer config", "artifact", "grub.cfg")
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write(data) //nolint:errcheck // Best-effort HTTP response.
 	case "complete":
