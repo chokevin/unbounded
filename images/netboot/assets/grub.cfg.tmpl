@@ -58,6 +58,6 @@ menuentry "Unbounded Metal Install" {
     console=tty0 console=ttyS0,115200n8 \
     {{- end }}
     ---
-  initrd {{ .ArtifactRoot }}/initrd {{ .ArtifactRoot }}/init.cpio.gz
+  initrd {{ .ArtifactRoot }}/initrd {{ .ArtifactRoot }}/init.cpio
 }
 {{ end }}

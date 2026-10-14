@@ -149,7 +149,7 @@ func (h *HTTPServer) handleFile(w http.ResponseWriter, r *http.Request) {
 	// edited. Resolve its artifacts from the operation snapshot, never live input.
 	if h.Media != nil {
 		switch path {
-		case "disk.img.gz", "vmlinuz", "initrd", "init.cpio", "init.cpio.gz", "grub.cfg", "grub/grub.cfg":
+		case "disk.img.gz", "vmlinuz", "initrd", "init.cpio", "grub.cfg", "grub/grub.cfg":
 			remote, _, err := net.SplitHostPort(r.RemoteAddr)
 			if err != nil {
 				http.NotFound(w, r)
@@ -223,7 +223,7 @@ func (h *HTTPServer) handleFile(w http.ResponseWriter, r *http.Request) {
 
 	if node.Spec.Netboot().TargetBootProtocol() == "VirtualMedia" {
 		switch path {
-		case "disk.img.gz", "vmlinuz", "initrd", "init.cpio", "init.cpio.gz":
+		case "disk.img.gz", "vmlinuz", "initrd", "init.cpio":
 			http.NotFound(w, r)
 			return
 		}

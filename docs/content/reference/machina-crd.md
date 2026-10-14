@@ -501,7 +501,7 @@ file in the netboot image provides image-level configuration such as
 
 ### Image layout
 
-![Netboot OCI image filesystem layout under /disk/: shimx64.efi, grubx64.efi, vmlinuz, initrd, init.cpio.gz, unbounded-agent, metadata.yaml, grub/grub.cfg.tmpl, cloud-init templates](../../img/machina-netboot-layout.svg)
+![Netboot OCI image filesystem layout under /disk/: shimx64.efi, grubx64.efi, vmlinuz, initrd, init.cpio, unbounded-agent, metadata.yaml, grub/grub.cfg.tmpl, cloud-init templates](../../img/machina-netboot-layout.svg)
 
 ### Template data
 

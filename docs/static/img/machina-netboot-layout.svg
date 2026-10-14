@@ -29,8 +29,8 @@
   <text x="70" y="168" fill="#e4e4e7" font-size="11" font-family="'SF Mono', 'Fira Code', monospace">initrd</text>
   <text x="230" y="168" fill="#a0a0a8" font-size="10">Initramfs</text>
 
-  <!-- init.cpio.gz -->
-  <text x="70" y="190" fill="#e4e4e7" font-size="11" font-family="'SF Mono', 'Fira Code', monospace">init.cpio.gz</text>
+  <!-- init.cpio -->
+  <text x="70" y="190" fill="#e4e4e7" font-size="11" font-family="'SF Mono', 'Fira Code', monospace">init.cpio</text>
   <text x="230" y="190" fill="#a0a0a8" font-size="10">Custom init overlay</text>
 
   <!-- unbounded-agent -->

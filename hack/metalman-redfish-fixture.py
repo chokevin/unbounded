@@ -138,7 +138,7 @@ class State:
                     ("grubx64.efi", f"{base_url}/grubx64.efi"),
                     ("vmlinuz", f"{base_url}/vmlinuz"),
                     ("initrd", f"{base_url}/initrd"),
-                    ("init.cpio.gz", f"{base_url}/init.cpio.gz"),
+                    ("init.cpio", f"{base_url}/init.cpio"),
                     ("grub/grub.cfg", f"{base_url}/grub/grub.cfg"),
                 ):
                     target = artifact_dir / path
@@ -160,7 +160,7 @@ class State:
                     ("grubx64.efi", "::/EFI/BOOT/grubx64.efi"),
                     ("vmlinuz", "::/vmlinuz"),
                     ("initrd", "::/initrd"),
-                    ("init.cpio.gz", "::/init.cpio.gz"),
+                    ("init.cpio", "::/init.cpio"),
                     ("grub/grub.cfg", "::/grub/grub.cfg"),
                     ("grub/grub.cfg", "::/EFI/BOOT/grub.cfg"),
                 ):
