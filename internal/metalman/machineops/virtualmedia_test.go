@@ -38,8 +38,11 @@ type mediaTestDriver struct {
 	opName    string
 	calls     []string
 	err       error
+	bootErr   error
 	supported bool
 	state     redfish.PowerState
+	boot      redfish.BootConfig
+	boots     []redfish.BootConfig
 	seen      *v1alpha3.Machine
 }
 
@@ -88,6 +91,22 @@ func (d *mediaTestDriver) PowerState(context.Context) (redfish.PowerState, error
 	return d.state, nil
 }
 
+func (d *mediaTestDriver) GetBootConfig(context.Context) (redfish.BootConfig, error) {
+	d.calls = append(d.calls, "get-boot")
+	if d.bootErr != nil {
+		return redfish.BootConfig{}, d.bootErr
+	}
+
+	if len(d.boots) != 0 {
+		config := d.boots[0]
+		d.boots = d.boots[1:]
+
+		return config, nil
+	}
+
+	return d.boot, nil
+}
+
 func (d *mediaTestDriver) Reset(ctx context.Context, action redfish.ResetType) error {
 	if err := d.effect(ctx, string(action)); err != nil {
 		return err
@@ -129,7 +148,10 @@ func mediaFixture(t *testing.T) (*Reconciler, *mediaTestDriver, *v1alpha3.Machin
 	op.UID = "op-uid"
 	op.Spec.MachineRef = m.Name
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(m, op).WithStatusSubresource(op).Build()
-	d := &mediaTestDriver{c: c, opName: op.Name, supported: true, state: redfish.PowerOn}
+	d := &mediaTestDriver{
+		c: c, opName: op.Name, supported: true, state: redfish.PowerOn,
+		boot: redfish.BootConfig{Mode: redfish.BootModeUEFI, Target: "RemoteDrive"},
+	}
 	r := testReconciler(c, d, "rack-a")
 	r.BootMedia = d
 
@@ -155,15 +177,23 @@ func TestVirtualMediaDurableLifecycleAndRestart(t *testing.T) {
 	require.Regexp(t, `^[0-9a-f]{32}$`, current.Status.Targets[0].BootMedia.ID)
 	require.Contains(t, current.Finalizers, mediaFinalizer)
 	// Recreate the reconciler at each phase, retaining only API and BMC state.
-	for range 9 {
+	for range 15 {
 		r = testReconciler(r.Client, d, "rack-a")
 		r.BootMedia = d
+
 		current = mediaStep(t, r, op.Name)
+		if current.Status.Targets[0].BootMedia.Phase == "WaitingBootLoader" {
+			break
+		}
 	}
 
+	require.Equal(t, "WaitingBootLoader", current.Status.Targets[0].BootMedia.Phase)
+	current.Status.Targets[0].BootMedia.LoaderStartedAt = ptrTo(fixedNow())
+	require.NoError(t, r.Status().Update(t.Context(), current))
+	current = mediaStep(t, r, op.Name)
 	require.Equal(t, "Installing", current.Status.Targets[0].BootMedia.Phase)
 	require.Len(t, current.Status.Targets[0].BootMedia.SourceName, 39)
-	require.Equal(t, []string{"prepare", "stage", "ForceOff", "mount", "boot", "On"}, d.calls)
+	require.Equal(t, []string{"prepare", "stage", "ForceOff", "mount", "boot", "get-boot", "On", "get-boot"}, d.calls)
 
 	current.Status.Targets[0].BootMedia.ImageWritten = true
 	current.Status.Targets[0].BootMedia.RebootRequestedAt = ptrTo(fixedNow())
@@ -479,10 +509,21 @@ func TestVirtualMediaRealProviderCallbackAndPartialCleanup(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	for range 8 {
+	for range 12 {
 		current = mediaStep(t, r, op.Name)
+		if current.Status.Targets[0].BootMedia.Phase == "WaitingBootLoader" {
+			break
+		}
 	}
 
+	require.Equal(t, "WaitingBootLoader", current.Status.Targets[0].BootMedia.Phase)
+
+	grub := httptest.NewRequest(http.MethodGet, "/bootmedia/"+id+"/grub.cfg", nil)
+	grub.RemoteAddr = "192.0.2.20:4567"
+	grubResponse := httptest.NewRecorder()
+	p.ServeHTTP(grubResponse, grub)
+	require.Equal(t, http.StatusOK, grubResponse.Code)
+	current = mediaStep(t, r, op.Name)
 	require.Equal(t, "Installing", current.Status.Targets[0].BootMedia.Phase)
 
 	request := func(method, action string) int {
@@ -545,18 +586,10 @@ func TestVirtualMediaRealProviderCallbackAndPartialCleanup(t *testing.T) {
 
 func TestVirtualMediaLongInstallAndLateHandoff(t *testing.T) {
 	r, d, _, op := mediaFixture(t)
-
-	var current *v1alpha3.MachineOperation
-	for range 10 {
-		current = mediaStep(t, r, op.Name)
-	}
-
-	require.Equal(t, "Installing", current.Status.Targets[0].BootMedia.Phase)
-	current.Status.Targets[0].BootMedia.LoaderStartedAt = ptrTo(fixedNow())
-	require.NoError(t, r.Status().Update(t.Context(), current))
+	mediaInstalling(t, r, op.Name)
 
 	r.Now = func() metav1.Time { return metav1.NewTime(fixedNow().Add(30 * time.Minute)) }
-	current = mediaStep(t, r, op.Name)
+	current := mediaStep(t, r, op.Name)
 	require.Equal(t, v1alpha3.OperationPhaseInProgress, current.Status.Phase)
 
 	r.Now = func() metav1.Time { return metav1.NewTime(fixedNow().Add(time.Hour)) }
@@ -722,24 +755,39 @@ func TestVirtualMediaUsesFrozenActionsAndRejectsReplacement(t *testing.T) {
 func mediaInstalling(t *testing.T, r *Reconciler, name string) *v1alpha3.MachineOperation {
 	t.Helper()
 
+	current := mediaWaitingBootLoader(t, r, name)
+	current.Status.Targets[0].BootMedia.LoaderStartedAt = ptrTo(fixedNow())
+	require.NoError(t, r.Status().Update(t.Context(), current))
+	current = mediaStep(t, r, name)
+	require.Equal(t, "Installing", current.Status.Targets[0].BootMedia.Phase)
+
+	return current
+}
+
+func mediaWaitingBootLoader(t *testing.T, r *Reconciler, name string) *v1alpha3.MachineOperation {
+	t.Helper()
+
 	var current *v1alpha3.MachineOperation
-	for range 10 {
+	for range 20 {
 		current = mediaStep(t, r, name)
+		if current.Status.Targets[0].BootMedia.Phase == "WaitingBootLoader" {
+			return current
+		}
 	}
 
-	require.Equal(t, "Installing", current.Status.Targets[0].BootMedia.Phase)
+	require.FailNow(t, "virtual media did not reach WaitingBootLoader", "last phase: %s", current.Status.Targets[0].BootMedia.Phase)
 
 	return current
 }
 
 func TestVirtualMediaBootRetryWithoutLoaderStart(t *testing.T) {
 	r, d, _, op := mediaFixture(t)
-	mediaInstalling(t, r, op.Name)
+	mediaWaitingBootLoader(t, r, op.Name)
 
 	r.Now = func() metav1.Time { return metav1.NewTime(fixedNow().Add(9 * time.Minute)) }
 	current := mediaStep(t, r, op.Name)
-	require.Equal(t, "Installing", current.Status.Targets[0].BootMedia.Phase)
-	require.Contains(t, current.Status.Targets[0].Message, "waiting for host to boot")
+	require.Equal(t, "WaitingBootLoader", current.Status.Targets[0].BootMedia.Phase)
+	require.Contains(t, current.Status.Targets[0].Message, "bootloader request")
 
 	// No loader start after the boot timeout: replace the image under a new
 	// name, then power cycle and mount again.
@@ -763,20 +811,127 @@ func TestVirtualMediaBootRetryWithoutLoaderStart(t *testing.T) {
 	require.Empty(t, b.SourceName)
 	require.Equal(t, []string{"cleanup", "delete", "release"}, d.calls[len(resets):])
 
-	for range 8 {
-		current = mediaStep(t, r, op.Name)
-	}
+	current = mediaWaitingBootLoader(t, r, op.Name)
 
 	b = current.Status.Targets[0].BootMedia
-	require.Equal(t, "Installing", b.Phase)
+	require.Equal(t, "WaitingBootLoader", b.Phase)
 	require.Equal(t, "ub-"+b.ID+".iso", b.SourceName)
-	require.Equal(t, []string{"cleanup", "delete", "release", "prepare", "stage", string(redfish.ResetForceOff), "mount", "boot", string(redfish.ResetOn)}, d.calls[len(resets):])
+	require.Equal(t, []string{"cleanup", "delete", "release", "prepare", "stage", string(redfish.ResetForceOff), "mount", "boot", "get-boot", string(redfish.ResetOn), "get-boot"}, d.calls[len(resets):])
 	require.False(t, b.Cleaned)
+}
+
+func TestVirtualMediaPowerOnWithoutBootloaderRequestDoesNotInstall(t *testing.T) {
+	r, _, _, op := mediaFixture(t)
+	current := mediaWaitingBootLoader(t, r, op.Name)
+
+	b := current.Status.Targets[0].BootMedia
+	require.Equal(t, "WaitingBootLoader", b.Phase)
+	require.Equal(t, v1alpha3.OperationStageWaitingBootLoader, current.Status.Targets[0].Stage)
+	require.Nil(t, b.LoaderStartedAt)
+	require.NotNil(t, b.BootLoaderDeadline)
+	require.NotNil(t, b.PrePowerOnBootConfig)
+	require.NotNil(t, b.PostPowerOnBootConfig)
+	require.NotEqual(t, "Installing", b.Phase)
+}
+
+func TestVirtualMediaBootloaderRequestStartsInstallWait(t *testing.T) {
+	r, _, _, op := mediaFixture(t)
+	current := mediaWaitingBootLoader(t, r, op.Name)
+	started := metav1.NewTime(fixedNow().Add(time.Minute))
+	current.Status.Targets[0].BootMedia.LoaderStartedAt = &started
+	require.NoError(t, r.Status().Update(t.Context(), current))
+
+	current = mediaStep(t, r, op.Name)
+	b := current.Status.Targets[0].BootMedia
+	require.Equal(t, "Installing", b.Phase)
+	require.True(t, b.PhaseStartedAt.Equal(&started))
+	require.Contains(t, current.Status.Targets[0].Message, "write the boot image")
+}
+
+func TestVirtualMediaRejectsBootConfigBeforePowerOn(t *testing.T) {
+	r, d, _, op := mediaFixture(t)
+	d.boot = redfish.BootConfig{Mode: redfish.BootModeUEFI, Target: redfish.BootTargetHdd}
+
+	var current *v1alpha3.MachineOperation
+	for range 20 {
+		current = mediaStep(t, r, op.Name)
+		if current.Status.Targets[0].Phase == v1alpha3.OperationPhaseFailed {
+			break
+		}
+	}
+
+	target := current.Status.Targets[0]
+	require.Equal(t, v1alpha3.OperationPhaseFailed, target.Phase)
+	require.Contains(t, target.Message, "expected mode UEFI and target RemoteDrive")
+	require.NotNil(t, target.BootMedia.PrePowerOnBootConfig)
+	require.Equal(t, string(redfish.BootTargetHdd), target.BootMedia.PrePowerOnBootConfig.Target)
+	require.NotContains(t, d.calls, string(redfish.ResetOn))
+}
+
+func TestVirtualMediaBootConfigReadFailureBlocksPowerOn(t *testing.T) {
+	r, d, _, op := mediaFixture(t)
+	d.bootErr = errors.New("boot configuration unavailable")
+
+	var current *v1alpha3.MachineOperation
+	for range 20 {
+		current = mediaStep(t, r, op.Name)
+		if current.Status.Targets[0].Phase == v1alpha3.OperationPhaseFailed {
+			break
+		}
+	}
+
+	target := current.Status.Targets[0]
+	require.Equal(t, v1alpha3.OperationPhaseFailed, target.Phase)
+	require.Contains(t, target.Message, "boot configuration unavailable")
+	require.Nil(t, target.BootMedia.PrePowerOnBootConfig)
+	require.NotContains(t, d.calls, string(redfish.ResetOn))
+}
+
+func TestVirtualMediaPersistsLostBootOverrideAfterPowerOn(t *testing.T) {
+	r, d, _, op := mediaFixture(t)
+	d.boots = []redfish.BootConfig{
+		{Mode: redfish.BootModeUEFI, Target: redfish.BootTargetRemoteDrive},
+		{Mode: redfish.BootModeUEFI, Target: redfish.BootTargetHdd},
+	}
+
+	var current *v1alpha3.MachineOperation
+	for range 20 {
+		current = mediaStep(t, r, op.Name)
+		if current.Status.Targets[0].Phase == v1alpha3.OperationPhaseFailed {
+			break
+		}
+	}
+
+	target := current.Status.Targets[0]
+	require.Equal(t, v1alpha3.OperationPhaseFailed, target.Phase)
+	require.NotNil(t, target.BootMedia.PrePowerOnBootConfig)
+	require.NotNil(t, target.BootMedia.PostPowerOnBootConfig)
+	require.Equal(t, string(redfish.BootTargetHdd), target.BootMedia.PostPowerOnBootConfig.Target)
+	require.Contains(t, target.Message, "expected mode UEFI and target RemoteDrive")
+	require.Contains(t, d.calls, string(redfish.ResetOn))
+}
+
+func TestVirtualMediaBootloaderDeadlineSurvivesRestart(t *testing.T) {
+	r, d, _, op := mediaFixture(t)
+	current := mediaWaitingBootLoader(t, r, op.Name)
+	deadline := current.Status.Targets[0].BootMedia.BootLoaderDeadline.DeepCopy()
+
+	restarted := testReconciler(r.Client, d, "rack-a")
+	restarted.BootMedia = d
+	restarted.Now = func() metav1.Time { return metav1.NewTime(deadline.Add(-time.Second)) }
+	current = mediaStep(t, restarted, op.Name)
+	require.Equal(t, deadline, current.Status.Targets[0].BootMedia.BootLoaderDeadline)
+	require.Equal(t, "WaitingBootLoader", current.Status.Targets[0].BootMedia.Phase)
+
+	restarted.Now = func() metav1.Time { return metav1.NewTime(deadline.Time) }
+	current = mediaStep(t, restarted, op.Name)
+	require.Equal(t, "Replacing", current.Status.Targets[0].BootMedia.Phase)
+	require.Equal(t, int32(1), current.Status.Targets[0].BootMedia.BootAttempts)
 }
 
 func TestVirtualMediaReplaceRetriesFailedCleanup(t *testing.T) {
 	r, d, _, op := mediaFixture(t)
-	current := mediaInstalling(t, r, op.Name)
+	current := mediaWaitingBootLoader(t, r, op.Name)
 	oldID := current.Status.Targets[0].BootMedia.ID
 
 	r.Now = func() metav1.Time { return metav1.NewTime(fixedNow().Add(10 * time.Minute)) }
@@ -795,31 +950,28 @@ func TestVirtualMediaReplaceRetriesFailedCleanup(t *testing.T) {
 
 func TestVirtualMediaBootRetriesAreBounded(t *testing.T) {
 	r, _, _, op := mediaFixture(t)
-	mediaInstalling(t, r, op.Name)
+	mediaWaitingBootLoader(t, r, op.Name)
 
 	offset := time.Duration(0)
 	for attempt := 1; attempt < mediaMaxBootAttempts; attempt++ {
 		offset += 10 * time.Minute
 		r.Now = func() metav1.Time { return metav1.NewTime(fixedNow().Add(offset)) }
 
-		var current *v1alpha3.MachineOperation
-		for range 10 {
-			current = mediaStep(t, r, op.Name)
-		}
+		current := mediaWaitingBootLoader(t, r, op.Name)
 
-		require.Equal(t, "Installing", current.Status.Targets[0].BootMedia.Phase)
+		require.Equal(t, "WaitingBootLoader", current.Status.Targets[0].BootMedia.Phase)
 		require.Equal(t, int32(attempt), current.Status.Targets[0].BootMedia.BootAttempts)
 	}
 
 	r.Now = func() metav1.Time { return metav1.NewTime(fixedNow().Add(offset + 10*time.Minute)) }
 	current := mediaStep(t, r, op.Name)
 	require.Equal(t, v1alpha3.OperationPhaseFailed, current.Status.Targets[0].Phase)
-	require.Contains(t, current.Status.Targets[0].Message, "did not boot the virtual media")
+	require.Contains(t, current.Status.Targets[0].Message, "no bootloader request was observed")
 }
 
 func TestVirtualMediaNoBootRetryAfterLoaderStart(t *testing.T) {
 	r, _, _, op := mediaFixture(t)
-	current := mediaInstalling(t, r, op.Name)
+	current := mediaWaitingBootLoader(t, r, op.Name)
 	current.Status.Targets[0].BootMedia.LoaderStartedAt = ptrTo(fixedNow())
 	require.NoError(t, r.Status().Update(t.Context(), current))
 
@@ -851,12 +1003,13 @@ func TestVirtualMediaMergeKeepsLoaderStartOverStaleRetry(t *testing.T) {
 
 func TestVirtualMediaFailedBootReleasesWithoutHandoff(t *testing.T) {
 	r, d, _, op := mediaFixture(t)
-	mediaInstalling(t, r, op.Name)
+	current := mediaWaitingBootLoader(t, r, op.Name)
+	current.Status.Targets[0].BootMedia.BootAttempts = mediaMaxBootAttempts - 1
+	require.NoError(t, r.Status().Update(t.Context(), current))
 
 	// The host never booted the media, so no installer can be running.
 	r.Now = func() metav1.Time { return metav1.NewTime(fixedNow().Add(2 * time.Hour)) }
 
-	var current *v1alpha3.MachineOperation
 	for range 5 {
 		current = mediaStep(t, r, op.Name)
 	}

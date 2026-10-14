@@ -132,15 +132,16 @@ const (
 type OperationStage string
 
 const (
-	OperationStagePoweringOff      OperationStage = "PoweringOff"
-	OperationStageWaitingOff       OperationStage = "WaitingOff"
-	OperationStagePoweringOn       OperationStage = "PoweringOn"
-	OperationStageWaitingOn        OperationStage = "WaitingOn"
-	OperationStageRepaveRequested  OperationStage = "RepaveRequested"
-	OperationStageWaitingRepave    OperationStage = "WaitingRepave"
-	OperationStageWaitingCloudInit OperationStage = "WaitingCloudInit"
-	OperationStageWaitingNode      OperationStage = "WaitingNode"
-	OperationStageWaitingProvider  OperationStage = "WaitingProviderOperation"
+	OperationStagePoweringOff       OperationStage = "PoweringOff"
+	OperationStageWaitingOff        OperationStage = "WaitingOff"
+	OperationStagePoweringOn        OperationStage = "PoweringOn"
+	OperationStageWaitingOn         OperationStage = "WaitingOn"
+	OperationStageWaitingBootLoader OperationStage = "WaitingBootLoader"
+	OperationStageRepaveRequested   OperationStage = "RepaveRequested"
+	OperationStageWaitingRepave     OperationStage = "WaitingRepave"
+	OperationStageWaitingCloudInit  OperationStage = "WaitingCloudInit"
+	OperationStageWaitingNode       OperationStage = "WaitingNode"
+	OperationStageWaitingProvider   OperationStage = "WaitingProviderOperation"
 )
 
 // ProviderOperationStatus identifies a resumable operation owned by an
@@ -368,16 +369,32 @@ type MachineOperationBootMediaStatus struct {
 	NodeName string `json:"nodeName,omitempty"`
 	// PhaseStartedAt bounds active progress without spending retry attempts.
 	PhaseStartedAt *metav1.Time `json:"phaseStartedAt,omitempty"`
+	// BootLoaderDeadline is the persisted deadline for the first authorized
+	// bootloader request after power-on.
+	BootLoaderDeadline *metav1.Time `json:"bootLoaderDeadline,omitempty"`
 	// ReadinessStartedAt gives AC recovery one fixed grace window per phase.
 	ReadinessStartedAt *metav1.Time `json:"readinessStartedAt,omitempty"`
 	// LoaderStartedAt is set when the bootloader on the media first fetches
 	// its install config. It proves the host booted the media.
 	LoaderStartedAt *metav1.Time `json:"loaderStartedAt,omitempty"`
+	// PrePowerOnBootConfig records the sanitized Rack-SCM boot configuration
+	// verified immediately before power-on.
+	PrePowerOnBootConfig *MachineOperationBootConfigStatus `json:"prePowerOnBootConfig,omitempty"`
+	// PostPowerOnBootConfig records the sanitized Rack-SCM boot configuration
+	// observed after the host reports PowerState=On.
+	PostPowerOnBootConfig *MachineOperationBootConfigStatus `json:"postPowerOnBootConfig,omitempty"`
 	// BootAttempts counts power-on attempts used to boot the media.
 	BootAttempts int32 `json:"bootAttempts,omitempty"`
 	// Abandoned ends ownership after the installer never finished its
 	// handoff within the allowed time.
 	Abandoned bool `json:"abandoned,omitempty"`
+}
+
+// MachineOperationBootConfigStatus is sanitized boot-target readback evidence.
+type MachineOperationBootConfigStatus struct {
+	Target     string      `json:"target"`
+	Mode       string      `json:"mode"`
+	ObservedAt metav1.Time `json:"observedAt"`
 }
 
 // IsTerminal returns true if the operation phase is Complete or Failed.

@@ -60,7 +60,8 @@ func mediaBootUnconfirmed(target v1alpha3.MachineOperationTargetStatus) bool {
 	// After cleanup the media config serves halt, so only a loader that
 	// already started can still be running an installer.
 	return b.ImageWritten || b.LoaderStartedAt != nil ||
-		(!b.Cleaned && (b.Phase == "PoweringOn" || b.Phase == "Installing" || b.Phase == "Installed"))
+		(!b.Cleaned && (b.Phase == "PoweringOn" || b.Phase == "VerifyingBootAfterPowerOn" ||
+			b.Phase == "WaitingBootLoader" || b.Phase == "Installing" || b.Phase == "Installed"))
 }
 
 func hasOutstandingMedia(op *v1alpha3.MachineOperation) bool {
@@ -281,33 +282,51 @@ func (r *Reconciler) advanceVirtualMedia(ctx context.Context, op *v1alpha3.Machi
 			return failTarget(target, reasonTargetNoLongerOwned, "Machine identity or ownership changed", now)
 		}
 
-		if b.Phase == "Installing" {
-			target.Stage = v1alpha3.OperationStageWaitingRepave
+		if b.Phase == "WaitingBootLoader" {
+			target.Stage = v1alpha3.OperationStageWaitingBootLoader
 
-			if b.LoaderStartedAt == nil && b.PhaseStartedAt != nil && now.Sub(b.PhaseStartedAt.Time) >= r.mediaBootTimeout() {
-				// The BMC sometimes powers on without a usable virtual drive.
-				// No installer can run before the loader fetches its config,
-				// so a fresh power cycle is safe.
-				if b.BootAttempts+1 >= mediaMaxBootAttempts {
-					return failTarget(target, reasonTimedOut, "host did not boot the virtual media", now)
-				}
-
-				// Firmware 1.23.13 can keep a broken virtual drive for an image
-				// name, and mounting the same name again does not fix it. Replace
-				// the staged image with a new name before the next boot.
-				b.BootAttempts++
-				b.Phase = "Replacing"
-				b.PhaseStartedAt = &now
-				b.ReadinessStartedAt = nil
-				target.Message = fmt.Sprintf("host did not boot the virtual media; retrying (attempt %d)", b.BootAttempts+1)
+			if b.LoaderStartedAt != nil {
+				b.Phase = "Installing"
+				b.PhaseStartedAt = b.LoaderStartedAt.DeepCopy()
+				target.Stage = v1alpha3.OperationStageWaitingRepave
+				target.Message = "waiting for virtual media installer to write the boot image"
 
 				return targetChange{target: target}
 			}
 
-			target.Message = "waiting for virtual media installer to write the boot image"
-			if b.LoaderStartedAt == nil {
-				target.Message = "waiting for host to boot the virtual media"
+			if b.BootLoaderDeadline == nil {
+				deadline := metav1.NewTime(now.Add(r.mediaBootTimeout()))
+				b.BootLoaderDeadline = &deadline
+
+				return targetChange{target: target}
 			}
+
+			if !now.Before(b.BootLoaderDeadline) {
+				// No installer can run before the capability-scoped loader
+				// request, so the existing bounded replacement retry is safe.
+				if b.BootAttempts+1 >= mediaMaxBootAttempts {
+					return failTarget(target, reasonTimedOut, "no bootloader request was observed after power-on", now)
+				}
+
+				b.BootAttempts++
+				b.Phase = "Replacing"
+				b.PhaseStartedAt = &now
+				b.BootLoaderDeadline = nil
+				b.ReadinessStartedAt = nil
+				target.Message = fmt.Sprintf("no bootloader request was observed after power-on; retrying (attempt %d)", b.BootAttempts+1)
+
+				return targetChange{target: target}
+			}
+
+			target.Message = "waiting for the first authorized virtual media bootloader request"
+
+			return targetChange{target: target}
+		}
+
+		if b.Phase == "Installing" {
+			target.Stage = v1alpha3.OperationStageWaitingRepave
+
+			target.Message = "waiting for virtual media installer to write the boot image"
 
 			return targetChange{target: target}
 		}
@@ -404,7 +423,19 @@ func (r *Reconciler) advanceVirtualMedia(ctx context.Context, op *v1alpha3.Machi
 		next = "SettingBoot"
 	case "SettingBoot":
 		err = vm.SetVirtualMediaBoot(ctx)
-		next = "PoweringOn"
+		next = "VerifyingBoot"
+	case "VerifyingBoot":
+		var config redfish.BootConfig
+
+		config, err = pc.GetBootConfig(ctx)
+		if err == nil {
+			b.PrePowerOnBootConfig = bootConfigStatus(config, now)
+			if configErr := validateVirtualMediaBootConfig(config); configErr != nil {
+				return failTarget(target, reasonExecutionFailed, configErr.Error(), now)
+			}
+
+			next = "PoweringOn"
+		}
 	case "PoweringOn":
 		var state redfish.PowerState
 
@@ -412,10 +443,24 @@ func (r *Reconciler) advanceVirtualMedia(ctx context.Context, op *v1alpha3.Machi
 		if err == nil {
 			switch state {
 			case redfish.PowerOn:
-				next = "Installing"
+				next = "VerifyingBootAfterPowerOn"
 			case redfish.PowerOff:
 				err = pc.Reset(ctx, redfish.ResetOn)
 			}
+		}
+	case "VerifyingBootAfterPowerOn":
+		var config redfish.BootConfig
+
+		config, err = pc.GetBootConfig(ctx)
+		if err == nil {
+			b.PostPowerOnBootConfig = bootConfigStatus(config, now)
+			if configErr := validateVirtualMediaBootConfig(config); configErr != nil {
+				return failTarget(target, reasonExecutionFailed, configErr.Error(), now)
+			}
+
+			next = "WaitingBootLoader"
+			deadline := metav1.NewTime(now.Add(r.mediaBootTimeout()))
+			b.BootLoaderDeadline = &deadline
 		}
 	default:
 		return failTarget(target, reasonExecutionFailed, "unknown virtual media phase "+b.Phase, now)
@@ -434,6 +479,10 @@ func (r *Reconciler) advanceVirtualMedia(ctx context.Context, op *v1alpha3.Machi
 		b.Phase = next
 		b.PhaseStartedAt = &now
 		b.ReadinessStartedAt = nil
+
+		if next == "WaitingBootLoader" {
+			target.Stage = v1alpha3.OperationStageWaitingBootLoader
+		}
 	}
 
 	target.Message = "virtual media: " + b.Phase
@@ -452,8 +501,29 @@ func newMediaID() (string, error) {
 	return hex.EncodeToString(capability[:]), nil
 }
 
+func bootConfigStatus(config redfish.BootConfig, now metav1.Time) *v1alpha3.MachineOperationBootConfigStatus {
+	return &v1alpha3.MachineOperationBootConfigStatus{
+		Target: string(config.Target), Mode: string(config.Mode), ObservedAt: now,
+	}
+}
+
+func validateVirtualMediaBootConfig(config redfish.BootConfig) error {
+	if config.Mode != redfish.BootModeUEFI || config.Target != redfish.BootTargetRemoteDrive {
+		return fmt.Errorf(
+			"Rack-SCM boot configuration mismatch: expected mode %s and target %s, observed mode %q and target %q",
+			redfish.BootModeUEFI, redfish.BootTargetRemoteDrive, config.Mode, config.Target,
+		)
+	}
+
+	return nil
+}
+
 func (r *Reconciler) mediaProgressExpired(b *v1alpha3.MachineOperationBootMediaStatus, now metav1.Time) bool {
 	if b.PhaseStartedAt == nil {
+		return false
+	}
+
+	if b.Phase == "WaitingBootLoader" {
 		return false
 	}
 
@@ -552,8 +622,9 @@ func mergeMediaCallbacks(updated *v1alpha3.MachineOperationTargetStatus, latest 
 			// A boot retry was decided before the loader start was seen. The
 			// installer is running, so keep waiting for it instead.
 			updated.BootMedia.BootAttempts = latest.BootMedia.BootAttempts
-			updated.BootMedia.Phase = latest.BootMedia.Phase
-			updated.BootMedia.PhaseStartedAt = latest.BootMedia.PhaseStartedAt.DeepCopy()
+			updated.BootMedia.Phase = "Installing"
+			updated.BootMedia.PhaseStartedAt = latest.BootMedia.LoaderStartedAt.DeepCopy()
+			updated.BootMedia.BootLoaderDeadline = latest.BootMedia.BootLoaderDeadline.DeepCopy()
 			updated.BootMedia.ReadinessStartedAt = latest.BootMedia.ReadinessStartedAt.DeepCopy()
 			updated.Message = "waiting for virtual media installer to write the boot image"
 		}

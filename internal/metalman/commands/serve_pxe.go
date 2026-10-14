@@ -57,6 +57,7 @@ func ServePXECmd() *cobra.Command {
 		operationMaxConcurrentMachines int
 		operationMaxAttempts           int32
 		operationPollInterval          time.Duration
+		operationBootloaderTimeout     time.Duration
 		defaultNetbootImage            string
 		defaultNetbootPullSecret       string
 	)
@@ -257,6 +258,7 @@ func ServePXECmd() *cobra.Command {
 				MaxConcurrentMachines: operationMaxConcurrentMachines,
 				MaxAttempts:           operationMaxAttempts,
 				PollInterval:          operationPollInterval,
+				MediaBootTimeout:      operationBootloaderTimeout,
 			}).SetupWithManager(mgr); err != nil {
 				return fmt.Errorf("setting up MachineOperation reconciler: %w", err)
 			}
@@ -380,6 +382,7 @@ func ServePXECmd() *cobra.Command {
 	cmd.Flags().IntVar(&operationMaxConcurrentMachines, "operation-max-concurrent-machines", 10, "Maximum target Machines advanced concurrently within one MachineOperation")
 	cmd.Flags().Int32Var(&operationMaxAttempts, "operation-max-attempts", 3, "Maximum Redfish action attempts per target Machine")
 	cmd.Flags().DurationVar(&operationPollInterval, "operation-poll-interval", 5*time.Second, "Poll interval for in-progress MachineOperations")
+	cmd.Flags().DurationVar(&operationBootloaderTimeout, "operation-bootloader-timeout", 10*time.Minute, "Deadline for the first virtual-media bootloader request after power-on")
 	cmd.Flags().StringVar(&defaultNetbootImage, "default-netboot-image", DefaultNetbootImage, "Default OCI image containing PXE netboot artifacts")
 	cmd.Flags().StringVar(&defaultNetbootPullSecret, "default-netboot-pull-secret", "", "Namespaced Secret reference (namespace/name) for pulling the default netboot OCI image")
 
