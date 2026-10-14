@@ -423,6 +423,12 @@ Running metalman's DHCP server on a network segment that already has an active D
 
 **Machine stuck in repaving.** Check the active `HostReplace` `MachineOperation` target stage and conditions. Verify the target machine can reach metalman on TCP/8880 and that the BMC is reachable from metalman. Metalman retries the Redfish boot request while the operation remains active.
 
+**GRUB downloads the kernel and initrd, but no disk image request follows.**
+Verify the netboot image contains `init.cpio.gz` and that the rendered GRUB
+configuration loads it after `initrd`. Ubuntu's netboot initrd ends with a
+compressed archive; a raw cpio appended after it is rejected, so the stock
+Ubuntu installer runs instead of the Unbounded installer.
+
 **DHCP not responding.** Confirm `--dhcp-interface` points to the correct NIC (broadcast mode) or that your relay agent forwards to metalman's DHCP port. Check that no other DHCP server is competing on the same segment.
 
 **BMC connection failures.** Metalman uses TLS TOFU for Redfish - the first connection captures the BMC certificate fingerprint in `status.redfish.certFingerprint`. If a BMC certificate rotates, clear the fingerprint from the Machine status. Verify HTTPS/443 connectivity from metalman to the BMC.

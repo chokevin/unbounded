@@ -165,6 +165,7 @@ func mediaFixture(t *testing.T, arch string) (*MediaProvider, *v1alpha3.Machine,
 	require.NoError(t, populateOCICacheForArchitecture(cache.CacheDir, strings.Repeat("a", 64), arch, map[string][]byte{
 		"metadata.yaml": []byte(fmt.Sprintf("mediaFormat: %s\nmediaShim: %s\nmediaGrub: %s\n", mediaFormat, shim, grub)),
 		shim:            []byte("unchanged shim " + arch), grub: []byte("unchanged grub " + arch), "grub/grub.cfg.tmpl": tmpl,
+		"init.cpio.gz": []byte("compressed installer overlay"),
 	}))
 	cache.SetDigestForArchitecture(ref, arch, "sha256:"+strings.Repeat("a", 64))
 	m := &v1alpha3.Machine{ObjectMeta: metav1.ObjectMeta{Name: "host", UID: "host-uid"}, Spec: v1alpha3.MachineSpec{Host: &v1alpha3.HostSpec{Netboot: &v1alpha3.PXESpec{
@@ -362,7 +363,7 @@ func TestMediaScopedCallbacks(t *testing.T) {
 	require.NotNil(t, started.Status.Targets[0].BootMedia.LoaderStartedAt)
 	require.Nil(t, started.Status.Targets[1].BootMedia.LoaderStartedAt)
 	require.Contains(t, w.Body.String(), "linux (http,192.0.2.2:8080)/vmlinuz")
-	require.Contains(t, w.Body.String(), "initrd (http,192.0.2.2:8080)/initrd (http,192.0.2.2:8080)/init.cpio")
+	require.Contains(t, w.Body.String(), "initrd (http,192.0.2.2:8080)/initrd (http,192.0.2.2:8080)/init.cpio.gz")
 	require.Contains(t, w.Body.String(), "unbounded.virtual_media=1")
 	require.Contains(t, w.Body.String(), "unbounded.media_callback=http://192.0.2.2:8080/bootmedia/"+id)
 	require.NotContains(t, w.Body.String(), "chainloader")
@@ -488,6 +489,19 @@ func TestMediaReadyPersistenceFailure(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, mediaRequest(p, op.Status.Targets[0].BootMedia.ID, http.MethodGet, "ready", "192.0.2.20").Code)
 }
 
+func TestNetbootInitOverlayIsCompressed(t *testing.T) {
+	containerfile, err := os.ReadFile("../../../images/netboot/Containerfile")
+	require.NoError(t, err)
+	require.Contains(t, string(containerfile), "gzip --best > /artifacts/init.cpio.gz")
+	require.Contains(t, string(containerfile), "gzip --test /artifacts/init.cpio.gz")
+	require.NotContains(t, string(containerfile), "cp /artifacts/vmlinuz /artifacts/initrd /artifacts/init.cpio /disk/")
+
+	grub, err := os.ReadFile("../../../images/netboot/assets/grub.cfg.tmpl")
+	require.NoError(t, err)
+	require.Contains(t, string(grub), "{{ .ArtifactRoot }}/init.cpio.gz")
+	require.NotContains(t, string(grub), "{{ .ArtifactRoot }}/init.cpio\n")
+}
+
 func TestMediaInstallerWaitsThroughLateCleanup(t *testing.T) {
 	content, err := os.ReadFile("../../../images/netboot/assets/init")
 	require.NoError(t, err)
@@ -586,6 +600,18 @@ func TestMediaKernelHTTPRange(t *testing.T) {
 	require.Equal(t, http.StatusPartialContent, w.Code)
 	require.Equal(t, "bytes 5-10/19", w.Header().Get("Content-Range"))
 	require.Equal(t, "kernel", w.Body.String())
+}
+
+func TestMediaCompressedInitOverlay(t *testing.T) {
+	p, _, _ := mediaFixture(t, "arm64")
+	h := &HTTPServer{Media: p, FileResolver: *p.Resolver}
+	r := httptest.NewRequest(http.MethodGet, "/init.cpio.gz", nil)
+	r.RemoteAddr = "192.0.2.20:4321"
+
+	w := httptest.NewRecorder()
+	h.handleFile(w, r)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "compressed installer overlay", w.Body.String())
 }
 
 func TestMediaIdentityAndOldImage(t *testing.T) {
