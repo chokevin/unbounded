@@ -1,14 +1,25 @@
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: Apache-2.0
 
-# The installer runs the Azure Linux kernel. Its module set includes drivers
-# that the Ubuntu generic kernel lacks, such as the Microsoft MANA NIC.
-FROM mcr.microsoft.com/azurelinux/base/core:3.0 AS kernel
+ARG TARGETARCH
+
+# GB200 hosts need the Microsoft MANA NIC driver from the Azure Linux arm64
+# kernel. Keep the Ubuntu kernel on amd64 so its existing shim/GRUB secure-boot
+# chain continues to validate the kernel signature.
+FROM mcr.microsoft.com/azurelinux/base/core:3.0 AS kernel-arm64
 
 ARG INSTALLER_KERNEL=kernel
 
 RUN tdnf install -y "${INSTALLER_KERNEL}" && \
     tdnf clean all
+
+FROM docker.io/library/ubuntu:24.04 AS kernel-amd64
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends linux-image-generic && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM kernel-${TARGETARCH} AS kernel
 
 FROM docker.io/library/ubuntu:24.04 AS build
 
@@ -34,7 +45,9 @@ COPY --from=kernel /boot /tmp/kernel-boot
 RUN KVER=$(ls /lib/modules | head -1) && \
     find "/lib/modules/${KVER}" -name '*.ko.xz' -exec xz -d {} + && \
     depmod "${KVER}" && \
-    test -f "/lib/modules/${KVER}/kernel/drivers/net/ethernet/microsoft/mana/mana.ko"
+    if [ "${TARGETARCH}" = "arm64" ]; then \
+        test -f "/lib/modules/${KVER}/kernel/drivers/net/ethernet/microsoft/mana/mana.ko"; \
+    fi
 
 RUN mkdir -p /artifacts && \
     KVER=$(ls /lib/modules | head -1) && \

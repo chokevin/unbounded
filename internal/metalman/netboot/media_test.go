@@ -491,9 +491,10 @@ func TestMediaReadyPersistenceFailure(t *testing.T) {
 func TestNetbootInstallerKernelIncludesMANA(t *testing.T) {
 	containerfile, err := os.ReadFile("../../../images/netboot/Containerfile")
 	require.NoError(t, err)
-	require.Contains(t, string(containerfile), "FROM mcr.microsoft.com/azurelinux/base/core:3.0 AS kernel")
+	require.Contains(t, string(containerfile), "FROM mcr.microsoft.com/azurelinux/base/core:3.0 AS kernel-arm64")
+	require.Contains(t, string(containerfile), "FROM docker.io/library/ubuntu:24.04 AS kernel-amd64")
+	require.Contains(t, string(containerfile), "FROM kernel-${TARGETARCH} AS kernel")
 	require.Contains(t, string(containerfile), "kernel/drivers/net/ethernet/microsoft/mana/mana.ko")
-	require.NotContains(t, string(containerfile), "linux-image-generic")
 }
 
 func TestMediaInstallerWaitsThroughLateCleanup(t *testing.T) {
