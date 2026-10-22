@@ -26,6 +26,8 @@ import (
 	"github.com/Azure/unbounded/internal/signalworkload"
 )
 
+const kueueRequiredTopologyAnnotation = "kueue.x-k8s.io/podset-required-topology"
+
 const (
 	MaxParticipants       = 64
 	MaxMeasurementsBytes  = 16 * 1024
@@ -668,6 +670,7 @@ func ordinaryPod(
 			Name:            resourceName(config.RunName, participant.Index),
 			Namespace:       config.Namespace,
 			Labels:          labels,
+			Annotations:     topologyAnnotations(config.Queue),
 			OwnerReferences: []metav1.OwnerReference{workflow},
 		},
 		Spec: corev1.PodSpec{
@@ -738,6 +741,7 @@ func mpiJob(
 						labels,
 						nil,
 						nil,
+						nil,
 						corev1.Container{
 							Name:         "launcher",
 							Image:        config.RunnerImage,
@@ -752,6 +756,7 @@ func mpiJob(
 					"replicas": int64(1),
 					"template": podTemplate(
 						labels,
+						topologyAnnotations(config.Queue),
 						map[string]string{corev1.LabelHostname: participant.NodeName},
 						tolerations,
 						worker,
@@ -768,6 +773,7 @@ func mpiJob(
 
 func podTemplate(
 	labels map[string]string,
+	annotations map[string]string,
 	nodeSelector map[string]string,
 	tolerations []corev1.Toleration,
 	container corev1.Container,
@@ -780,7 +786,7 @@ func podTemplate(
 	}
 
 	template := corev1.PodTemplateSpec{
-		ObjectMeta: metav1.ObjectMeta{Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: annotations},
 		Spec: corev1.PodSpec{
 			RestartPolicy:                corev1.RestartPolicyNever,
 			NodeSelector:                 nodeSelector,
@@ -798,6 +804,14 @@ func podTemplate(
 	}
 
 	return content
+}
+
+func topologyAnnotations(queue string) map[string]string {
+	if queue == "" {
+		return nil
+	}
+
+	return map[string]string{kueueRequiredTopologyAnnotation: corev1.LabelHostname}
 }
 
 func applyPodPolicy(spec *corev1.PodSpec, policy signalv1.WorkloadPolicy) {

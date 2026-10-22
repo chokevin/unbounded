@@ -105,6 +105,10 @@ func TestRenderOrdinaryPodWithKueueQueue(t *testing.T) {
 	if queue := resources[0].GetLabels()["kueue.x-k8s.io/queue-name"]; queue != "certification" {
 		t.Fatalf("Pod queue label = %q", queue)
 	}
+
+	if topology := resources[0].GetAnnotations()[kueueRequiredTopologyAnnotation]; topology != corev1.LabelHostname {
+		t.Fatalf("Pod required topology = %q", topology)
+	}
 }
 
 func TestRenderMPIJobsPerParticipant(t *testing.T) {
@@ -139,6 +143,37 @@ func TestRenderMPIJobsPerParticipant(t *testing.T) {
 
 		if queue != "certification" {
 			t.Fatalf("resource %d queue = %q", index, queue)
+		}
+
+		workerTopology, _, err := unstructured.NestedString(
+			resource.Object,
+			"spec",
+			"mpiReplicaSpecs",
+			"Worker",
+			"template",
+			"metadata",
+			"annotations",
+			kueueRequiredTopologyAnnotation,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if workerTopology != corev1.LabelHostname {
+			t.Fatalf("resource %d worker required topology = %q", index, workerTopology)
+		}
+
+		if _, found, err := unstructured.NestedString(
+			resource.Object,
+			"spec",
+			"mpiReplicaSpecs",
+			"Launcher",
+			"template",
+			"metadata",
+			"annotations",
+			kueueRequiredTopologyAnnotation,
+		); err != nil || found {
+			t.Fatalf("resource %d launcher topology annotation: found=%t err=%v", index, found, err)
 		}
 
 		activeDeadline, _, err := unstructured.NestedInt64(resource.Object, "spec", "runPolicy", "activeDeadlineSeconds")
