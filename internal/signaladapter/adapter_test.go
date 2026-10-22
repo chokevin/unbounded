@@ -106,7 +106,7 @@ func TestRenderOrdinaryPodWithKueueQueue(t *testing.T) {
 		t.Fatalf("Pod queue label = %q", queue)
 	}
 
-	if topology := resources[0].GetAnnotations()[kueueRequiredTopologyAnnotation]; topology != corev1.LabelHostname {
+	if topology := resources[0].GetAnnotations()[kueueUnconstrainedTopologyAnnotation]; topology != "true" {
 		t.Fatalf("Pod required topology = %q", topology)
 	}
 }
@@ -153,13 +153,13 @@ func TestRenderMPIJobsPerParticipant(t *testing.T) {
 			"template",
 			"metadata",
 			"annotations",
-			kueueRequiredTopologyAnnotation,
+			kueueUnconstrainedTopologyAnnotation,
 		)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if workerTopology != corev1.LabelHostname {
+		if workerTopology != "true" {
 			t.Fatalf("resource %d worker required topology = %q", index, workerTopology)
 		}
 
@@ -171,7 +171,7 @@ func TestRenderMPIJobsPerParticipant(t *testing.T) {
 			"template",
 			"metadata",
 			"annotations",
-			kueueRequiredTopologyAnnotation,
+			kueueUnconstrainedTopologyAnnotation,
 		); err != nil || found {
 			t.Fatalf("resource %d launcher topology annotation: found=%t err=%v", index, found, err)
 		}

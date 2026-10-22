@@ -26,7 +26,7 @@ import (
 	"github.com/Azure/unbounded/internal/signalworkload"
 )
 
-const kueueRequiredTopologyAnnotation = "kueue.x-k8s.io/podset-required-topology"
+const kueueUnconstrainedTopologyAnnotation = "kueue.x-k8s.io/podset-unconstrained-topology"
 
 const (
 	MaxParticipants       = 64
@@ -811,7 +811,7 @@ func topologyAnnotations(queue string) map[string]string {
 		return nil
 	}
 
-	return map[string]string{kueueRequiredTopologyAnnotation: corev1.LabelHostname}
+	return map[string]string{kueueUnconstrainedTopologyAnnotation: "true"}
 }
 
 func applyPodPolicy(spec *corev1.PodSpec, policy signalv1.WorkloadPolicy) {
