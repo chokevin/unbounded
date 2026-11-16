@@ -400,7 +400,10 @@ type CheckStatus struct {
 	Order            int32      `json:"-"`
 	WorkflowNodeName string     `json:"-"`
 	Phase            CheckPhase `json:"phase"`
-	Verdict          string     `json:"-"`
+	// Verdict is populated as soon as completed stage evidence is validated.
+	// Resolved-plan Runs use StageVerdict values. Legacy Runs retain their
+	// historical Pass, Fail, and Inconclusive values.
+	Verdict string `json:"verdict,omitempty"`
 	// +kubebuilder:validation:MaxLength=1024
 	Reason string `json:"reason,omitempty"`
 	// Measurements, backend identities, backend evidence, and timestamps are

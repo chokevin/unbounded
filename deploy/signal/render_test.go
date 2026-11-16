@@ -1643,11 +1643,31 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 
 	if dashboard.UID != "project-signal-fleet-certification" ||
 		dashboard.Refresh != "15s" ||
-		len(dashboard.Panels) != 3 {
+		len(dashboard.Panels) != 11 {
 		t.Fatalf("dashboard identity = %#v", dashboard)
 	}
 
 	foundFleetMatrix := false
+	contentString := string(content)
+
+	for stage := 1; stage <= 20; stage++ {
+		if !strings.Contains(contentString, fmt.Sprintf("r%02d-", stage)) {
+			t.Fatalf("Grafana dashboard does not contain R%02d", stage)
+		}
+	}
+
+	for _, title := range []string{
+		"Foundation and inventory",
+		"Compute correctness",
+		"Fabric and collectives",
+		"Host and storage",
+		"Runtime, burn-in, telemetry",
+		"Inference serving",
+	} {
+		if !strings.Contains(contentString, title) {
+			t.Fatalf("Grafana dashboard does not contain group %q", title)
+		}
+	}
 
 	for _, panel := range dashboard.Panels {
 		for _, target := range panel.Targets {

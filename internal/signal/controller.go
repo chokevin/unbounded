@@ -2548,7 +2548,12 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			return ctrl.Result{}, err
 		}
 
-		checkStatuses := compactCheckStatuses(runningRunStatuses(workflow, &run))
+		checkStatuses := runningRunStatuses(workflow, &run)
+		if run.Spec.ResolvedPlan != nil {
+			checkStatuses = r.runningResolvedRunStatuses(ctx, workflow, &run, checkStatuses)
+		}
+
+		checkStatuses = compactCheckStatuses(checkStatuses)
 
 		if run.Status.Phase != signalv1.RunPhaseRunning ||
 			run.Status.Workflow.Phase != phase ||
@@ -4205,6 +4210,102 @@ func runningRunStatuses(
 	return statuses
 }
 
+func (r *RunReconciler) runningResolvedRunStatuses(
+	ctx context.Context,
+	workflow *unstructured.Unstructured,
+	run *signalv1.CertificationRun,
+	statuses []signalv1.CheckStatus,
+) []signalv1.CheckStatus {
+	statusIndex := 0
+
+	for phaseIndex := range run.Spec.ResolvedPlan.Phases {
+		phase := &run.Spec.ResolvedPlan.Phases[phaseIndex]
+		for stageIndex := range phase.Stages {
+			stage := &phase.Stages[stageIndex]
+			status := &statuses[statusIndex]
+
+			if statusIndex < len(run.Status.Checks) && run.Status.Checks[statusIndex].Verdict != "" {
+				status.Verdict = run.Status.Checks[statusIndex].Verdict
+				status.Reason = run.Status.Checks[statusIndex].Reason
+				applyStageVerdictStatus(status, signalv1.StageVerdict(status.Verdict))
+
+				statusIndex++
+
+				continue
+			}
+
+			switch status.Phase {
+			case signalv1.CheckPhaseSucceeded,
+				signalv1.CheckPhaseFailed,
+				signalv1.CheckPhaseInconclusive:
+			case signalv1.CheckPhaseSkipped:
+				status.Verdict = string(signalv1.StageVerdictSkipped)
+				statusIndex++
+
+				continue
+			default:
+				statusIndex++
+
+				continue
+			}
+
+			summary, _, err := r.readStageResult(
+				ctx,
+				workflow,
+				run,
+				int32(phaseIndex),
+				int32(stageIndex),
+				phase.Role,
+				stage,
+			)
+			if apierrors.IsNotFound(err) && status.Phase == signalv1.CheckPhaseSucceeded {
+				statusIndex++
+
+				continue
+			}
+
+			if err != nil {
+				status.Phase = signalv1.CheckPhaseInconclusive
+				status.Verdict = string(signalv1.StageVerdictInconclusive)
+				status.Reason = boundedStatusText("StageEvidenceInvalid: " + err.Error())
+				statusIndex++
+
+				continue
+			}
+
+			applyStageSummaryStatus(status, summary)
+
+			statusIndex++
+		}
+	}
+
+	return statuses
+}
+
+func applyStageSummaryStatus(
+	status *signalv1.CheckStatus,
+	summary *signalv1.StageEvidenceSummary,
+) {
+	status.Verdict = string(summary.Verdict)
+	applyStageVerdictStatus(status, summary.Verdict)
+}
+
+func applyStageVerdictStatus(
+	status *signalv1.CheckStatus,
+	verdict signalv1.StageVerdict,
+) {
+	switch verdict {
+	case signalv1.StageVerdictPassed:
+		status.Phase = signalv1.CheckPhaseSucceeded
+	case signalv1.StageVerdictFailed:
+		status.Phase = signalv1.CheckPhaseFailed
+	case signalv1.StageVerdictInconclusive, signalv1.StageVerdictCanceled:
+		status.Phase = signalv1.CheckPhaseInconclusive
+	case signalv1.StageVerdictSkipped:
+		status.Phase = signalv1.CheckPhaseSkipped
+	}
+}
+
 func workflowTaskNode(
 	nodes map[string]any,
 	workflowName string,
@@ -4288,6 +4389,8 @@ func terminalResolvedRunStatuses(
 		case signalv1.StageVerdictSkipped:
 			statuses[statusIndex].Phase = signalv1.CheckPhaseSkipped
 		}
+
+		statuses[statusIndex].Verdict = string(stage.Verdict)
 	}
 
 	return statuses

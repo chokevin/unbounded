@@ -24,6 +24,7 @@ type CertificationMetricsCollector struct {
 	reader               client.Reader
 	completedMeasurement *prometheus.Desc
 	r07MinimumAssertion  *prometheus.Desc
+	liveStageVerdict     *prometheus.Desc
 	nodeStatus           *prometheus.Desc
 }
 
@@ -40,6 +41,12 @@ func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetric
 			"project_signal_fleet_certification_r07_assertion_decimal",
 			"Minimum BF16 throughput projected from immutable completed R07 stage evidence.",
 			[]string{"namespace", "run", "run_uid", "assertion"},
+			nil,
+		),
+		liveStageVerdict: prometheus.NewDesc(
+			"project_signal_fleet_certification_live_stage_verdict",
+			"Validated stage verdict published while a CertificationRun is active.",
+			[]string{"namespace", "run", "run_uid", "stage", "verdict"},
 			nil,
 		),
 		nodeStatus: prometheus.NewDesc(
@@ -67,6 +74,8 @@ func (c *CertificationMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 
 	ch <- c.r07MinimumAssertion
 
+	ch <- c.liveStageVerdict
+
 	ch <- c.nodeStatus
 }
 
@@ -89,6 +98,7 @@ func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	for runIndex := range runs.Items {
 		run := &runs.Items[runIndex]
 		c.collectRun(run, ch)
+		c.collectLiveStageVerdicts(run, ch)
 
 		for participantIndex := range run.Spec.Participants {
 			participant := &run.Spec.Participants[participantIndex]
@@ -108,6 +118,50 @@ func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for _, status := range latestRuns {
 		c.collectNodeStatus(status.run, status.participantIndex, ch)
+	}
+}
+
+func (c *CertificationMetricsCollector) collectLiveStageVerdicts(
+	run *signalv1.CertificationRun,
+	ch chan<- prometheus.Metric,
+) {
+	if run.Spec.ResolvedPlan == nil {
+		return
+	}
+
+	statusIndex := 0
+
+	for phaseIndex := range run.Spec.ResolvedPlan.Phases {
+		phase := &run.Spec.ResolvedPlan.Phases[phaseIndex]
+		for stageIndex := range phase.Stages {
+			if statusIndex >= len(run.Status.Checks) {
+				return
+			}
+
+			verdict := signalv1.StageVerdict(run.Status.Checks[statusIndex].Verdict)
+			statusIndex++
+
+			switch verdict {
+			case signalv1.StageVerdictPassed,
+				signalv1.StageVerdictFailed,
+				signalv1.StageVerdictInconclusive,
+				signalv1.StageVerdictCanceled,
+				signalv1.StageVerdictSkipped:
+			default:
+				continue
+			}
+
+			ch <- prometheus.MustNewConstMetric(
+				c.liveStageVerdict,
+				prometheus.GaugeValue,
+				1,
+				run.Namespace,
+				run.Name,
+				string(run.UID),
+				phase.Stages[stageIndex].Name,
+				string(verdict),
+			)
+		}
 	}
 }
 

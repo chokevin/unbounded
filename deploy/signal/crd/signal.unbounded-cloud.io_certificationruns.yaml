@@ -2006,7 +2006,9 @@ spec:
           status:
             properties:
               checks:
-                description: Checks remains positionally aligned with spec.checks.
+                description: |-
+                  Checks remains positionally aligned with spec.checks for legacy Runs or
+                  the flattened resolved plan stages for phase-based Runs.
                 items:
                   properties:
                     phase:
@@ -2020,6 +2022,12 @@ spec:
                       type: string
                     reason:
                       maxLength: 1024
+                      type: string
+                    verdict:
+                      description: |-
+                        Verdict is populated as soon as completed stage evidence is validated.
+                        Resolved-plan Runs use StageVerdict values. Legacy Runs retain their
+                        historical Pass, Fail, and Inconclusive values.
                       type: string
                   required:
                   - phase

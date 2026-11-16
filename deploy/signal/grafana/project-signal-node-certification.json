@@ -169,6 +169,368 @@
       "type": "bargauge"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 10,
+      "panels": [],
+      "title": "Certification pipeline - R01-R20",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Foundation and inventory stages. Every stage remains visible with a zero when no node is currently there.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixedColor"
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "id": 4,
+      "options": {
+        "displayMode": "basic",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r01-hardware-preflight|r02-gpu-identity|r03-gpu-identity-mpi|r04-gpu-full-node|r05-gpu-full-node-mpi|r06-gpu-health\"}) or label_replace(vector(0), \"stage\", \"r01-hardware-preflight\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r02-gpu-identity\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r03-gpu-identity-mpi\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r04-gpu-full-node\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r05-gpu-full-node-mpi\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r06-gpu-health\", \"\", \"\")",
+          "instant": true,
+          "legendFormat": "{{stage}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Foundation and inventory - R01-R06",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Numerical correctness stages for BF16, FP8, and deterministic softmax.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "purple",
+            "mode": "fixedColor"
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "id": 5,
+      "options": {
+        "displayMode": "basic",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r07-gpu-gemm-bf16|r08-gpu-gemm-fp8|r09-softmax-determinism\"}) or label_replace(vector(0), \"stage\", \"r07-gpu-gemm-bf16\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r08-gpu-gemm-fp8\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r09-softmax-determinism\", \"\", \"\")",
+          "instant": true,
+          "legendFormat": "{{stage}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Compute correctness - R07-R09",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Local GPU fabric, NVLink collectives, and explicit NCCL backend stages.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "orange",
+            "mode": "fixedColor"
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "id": 6,
+      "options": {
+        "displayMode": "basic",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r10-nvbandwidth|r11-nccl-nvlink|r12-nccl-backend\"}) or label_replace(vector(0), \"stage\", \"r10-nvbandwidth\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r11-nccl-nvlink\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r12-nccl-backend\", \"\", \"\")",
+          "instant": true,
+          "legendFormat": "{{stage}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Fabric and collectives - R10-R12",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU NUMA behavior, fio scratch performance, and persistent scratch contract.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "yellow",
+            "mode": "fixedColor"
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 13
+      },
+      "id": 7,
+      "options": {
+        "displayMode": "basic",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r13-cpu-stream|r14-fio-storage|r17-scratch-contract\"}) or label_replace(vector(0), \"stage\", \"r13-cpu-stream\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r14-fio-storage\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r17-scratch-contract\", \"\", \"\")",
+          "instant": true,
+          "legendFormat": "{{stage}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Host and storage - R13-R14, R17",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Burn-in, single-GPU runtime delivery, and default GPU telemetry coverage.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "red",
+            "mode": "fixedColor"
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 13
+      },
+      "id": 8,
+      "options": {
+        "displayMode": "basic",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r15-gpu-burn|r16-gpu-one-device|r18-dcgm-telemetry\"}) or label_replace(vector(0), \"stage\", \"r15-gpu-burn\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r16-gpu-one-device\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r18-dcgm-telemetry\", \"\", \"\")",
+          "instant": true,
+          "legendFormat": "{{stage}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Runtime, burn-in, telemetry - R15-R16, R18",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Authoritative eight-GPU vLLM serving lanes with pinned model and runtime provenance.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixedColor"
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 13
+      },
+      "id": 9,
+      "options": {
+        "displayMode": "basic",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r19-qwen38-flash-vllm|r20-deepseek-v41-flash-vllm\"}) or label_replace(vector(0), \"stage\", \"r19-qwen38-flash-vllm\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r20-deepseek-v41-flash-vllm\", \"\", \"\")",
+          "instant": true,
+          "legendFormat": "{{stage}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Inference serving - R19-R20",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 11,
+      "panels": [],
+      "title": "Per-node certification",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -291,7 +653,7 @@
         "h": 20,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 21
       },
       "id": 3,
       "options": {
