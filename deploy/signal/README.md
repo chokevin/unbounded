@@ -546,6 +546,20 @@ The repository publishes `project-signal-vllm-canary` and
 `.github/workflows/images.yaml` workflow. The harness is based on vLLM v0.25.1
 at
 `docker.io/vllm/vllm-openai@sha256:e4f88a835143cd22aee2397a26ec6bb80b3a4a6fe0c882bcbc63822904766089`.
+Serving requests and latency/throughput measurements are produced by AIPerf
+v0.13.0 from the multi-architecture image
+`nvcr.io/nvidia/ai-dynamo/aiperf@sha256:514349de4fc72f62f15580dbe044219c5c4b113bd1c0c20082d1fc741a336721`.
+The image build copies AIPerf's isolated Python runtime into the canary image;
+it does not modify vLLM's Python environment. The image also exposes
+`project-signal-aiperf`, a generic offline profile runner that owns command
+construction, timeout handling, versioned export validation, and normalized
+result parsing. Private certification packages remain responsible for model
+selection, request shape, metric declarations, thresholds, and assertions.
+The canonical harness uses the same runner for one warmup and one measured
+streaming completion at concurrency one, with network-backed telemetry and
+server-metric discovery disabled. `outputTokensPerSecond` is AIPerf's per-user
+output throughput, which is derived from inter-token latency and excludes time
+to first token.
 The cache image contains only the approved
 `EleutherAI/pythia-70m-deduped` Apache-2.0 snapshot at revision
 `e93a9faa9c77e5d09219f6c868bfc7a1bd65593c`. Its canonical sorted TSV
@@ -794,7 +808,9 @@ After each stage completes, the controller validates the immutable stage result
 and publishes its bounded typed measurement projection in Run status while the
 parent Workflow continues. It exports numeric completed measurements as
 `project_signal_fleet_certification_measurement`; compatibility projections such
-as the completed R07 minimum derive from the same state. Script metrics may
+as the completed R07 minimum derive from the same state. The fleet Grafana
+dashboard uses this projection for run-selectable R19/R20 AIPerf output token
+throughput and time-to-first-token panels. Script metrics may
 declare a bounded telemetry contract with a live
 gauge mode, allowed dimensions, series and sample limits, and an optional final
 evidence aggregation. Workloads append generic JSON measurement records; the

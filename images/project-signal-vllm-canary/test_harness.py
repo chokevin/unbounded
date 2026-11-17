@@ -192,7 +192,7 @@ class HarnessTest(unittest.TestCase):
             mock.patch.object(harness, "gpu_memory_used_bytes", return_value=1024),
             mock.patch.object(
                 harness,
-                "issue_completion",
+                "run_aiperf",
                 return_value={
                     "promptTokens": 5,
                     "completionTokens": 8,
@@ -269,7 +269,7 @@ class HarnessTest(unittest.TestCase):
             mock.patch.object(harness, "gpu_memory_used_bytes", return_value=1024),
             mock.patch.object(
                 harness,
-                "issue_completion",
+                "run_aiperf",
                 return_value={
                     "promptTokens": 5,
                     "completionTokens": 8,
@@ -318,6 +318,10 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(
             body["metadata"]["labels"]["signal.unbounded-cloud.io/run-uid"],
             "run-uid",
+        )
+        self.assertEqual(
+            body["metadata"]["annotations"]["signal.unbounded-cloud.io/aiperf-version"],
+            harness.AIPERF_VERSION,
         )
 
 

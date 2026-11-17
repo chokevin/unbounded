@@ -19,6 +19,8 @@ import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import aiperf_runner
+
 MODEL_IDENTITY = (
     "EleutherAI/pythia-70m-deduped@"
     "sha256:52b9b0fa1a8a67424d2e8f7994675698c60e3eb1a7925091930ecc4958dbcd7e"
@@ -39,6 +41,7 @@ PROMPT_FIXTURE = {
 PROMPT_FIXTURE_DIGEST = (
     "sha256:87c87bfc4863e490bdef827c5aa1c0b48f47311e2fed3fd002c3e05dfad23d99"
 )
+AIPERF_VERSION = aiperf_runner.AIPERF_VERSION
 RESULT_SCHEMA = "signal.unbounded-cloud.io/invocation-result/v1"
 TENSOR_PARALLEL_SIZE = 8
 SERVER_PORT = 8000
@@ -329,56 +332,33 @@ def wait_for_service(process, timeout):
     return False, server_errors + 1
 
 
-def issue_completion(timeout):
-    payload = dict(PROMPT_FIXTURE)
-    payload.update(
-        {
-            "model": MODEL_IDENTITY,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
-    )
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{SERVER_PORT}/v1/completions",
-        data=canonical_json(payload).encode("utf-8"),
-        headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
-    )
-
-    request_started = time.monotonic()
-    first_token_at = None
-    usage = None
-
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        for raw_line in response:
-            line = raw_line.decode("utf-8").strip()
-            if not line.startswith("data: "):
-                continue
-
-            data = line.removeprefix("data: ")
-            if data == "[DONE]":
-                break
-
-            chunk = json.loads(data)
-            if first_token_at is None and any(
-                choice.get("text") for choice in chunk.get("choices", [])
-            ):
-                first_token_at = time.monotonic()
-
-            if chunk.get("usage"):
-                usage = chunk["usage"]
-
-    request_finished = time.monotonic()
-    if first_token_at is None or usage is None:
-        raise HarnessError("vLLM response omitted token timing or usage", "InvalidResult")
+def run_aiperf(model_cache, timeout):
+    try:
+        result = aiperf_runner.run_profile(
+            {
+                "model": MODEL_IDENTITY,
+                "tokenizer": model_cache,
+                "url": f"http://127.0.0.1:{SERVER_PORT}",
+                "prompt": PROMPT_FIXTURE["prompt"],
+                "max_tokens": PROMPT_FIXTURE["max_tokens"],
+                "request_count": 1,
+                "concurrency": 1,
+                "timeout_seconds": timeout,
+                "random_seed": PROMPT_FIXTURE["seed"],
+            }
+        )
+    except aiperf_runner.AIPerfError as error:
+        raise HarnessError(
+            str(error),
+            error.reason,
+        ) from error
 
     return {
-        "promptTokens": int(usage["prompt_tokens"]),
-        "completionTokens": int(usage["completion_tokens"]),
-        "endToEndLatency": request_finished - request_started,
-        "timeToFirstToken": first_token_at - request_started,
-        "outputTokensPerSecond": (
-            int(usage["completion_tokens"]) / max(request_finished - first_token_at, 0.001)
-        ),
+        "promptTokens": result["promptTokens"],
+        "completionTokens": result["completionTokens"],
+        "endToEndLatency": result["endToEndLatencyMs"] / 1000,
+        "timeToFirstToken": result["timeToFirstTokenMs"] / 1000,
+        "outputTokensPerSecond": result["outputTokensPerSecond"],
     }
 
 
@@ -422,6 +402,7 @@ def create_result_configmap(namespace, name, run_uid, envelope):
             "labels": {"signal.unbounded-cloud.io/run-uid": run_uid},
             "annotations": {
                 "signal.unbounded-cloud.io/invocation-result-digest": digest,
+                "signal.unbounded-cloud.io/aiperf-version": AIPERF_VERSION,
                 "signal.unbounded-cloud.io/model-manifest-digest": MODEL_MANIFEST_DIGEST,
                 "signal.unbounded-cloud.io/model-revision": MODEL_REVISION,
             },
@@ -589,15 +570,18 @@ def run_harness(args):
             )
 
         try:
-            completion = issue_completion(parse_duration(parameters["requestTimeout"]))
+            completion = run_aiperf(
+                args.model_cache,
+                parse_duration(parameters["requestTimeout"]),
+            )
             request_succeeded = True
         except (HarnessError, OSError, ValueError, urllib.error.URLError) as error:
             request_errors += 1
-            raise HarnessError(f"deterministic request failed: {error}", "AssertionFailed") from error
+            raise HarnessError(f"AIPerf profile failed: {error}", "AssertionFailed") from error
 
         outcome = "Passed"
         reason = "Completed"
-        message = "bounded offline vLLM canary completed"
+        message = f"bounded offline vLLM canary completed with AIPerf {AIPERF_VERSION}"
         exit_code = 0
     except HarnessError as error:
         outcome = "Failed" if error.reason in ("AssertionFailed", "IdentityMismatch") else "Inconclusive"
