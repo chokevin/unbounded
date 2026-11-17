@@ -1,7 +1,7 @@
 # Project Signal controller
 
-Project Signal performs one certification run for a newly joined Node or a
-small, explicitly selected group of Nodes. The controller snapshots the
+Project Signal performs immutable certification runs for newly joined Nodes or
+small, explicitly selected groups of Nodes. The controller snapshots the
 approved Profile, referenced Suite, and scripts, reserves and cordons every
 participant, runs the Suite's resolved executable plan through Argo Workflows,
 persists one immutable evidence document, and cleans up all temporary
@@ -10,7 +10,8 @@ per-Node qualification ledgers. A successful Run alone is not production
 eligibility.
 
 Project Signal does not integrate with Kueue. Queue admission and repeatable
-fleet scheduling are intentionally deferred.
+fleet scheduling outside bounded initial-validation campaigns are intentionally
+deferred.
 
 ## Components
 
@@ -25,6 +26,11 @@ fleet scheduling are intentionally deferred.
 - `CertificationProfile` is cluster-scoped admission policy: it defines
   participant selection and references one Suite.
 - `CertificationRun` is a namespaced, immutable execution snapshot.
+- `CertificationCampaignPolicy` is a cluster-scoped node selector, Profile
+  reference, trigger, and bounded campaign duration.
+- `CertificationCampaign` is the namespaced, controller-owned execution state
+  for one exact Node UID. It serializes full immutable Runs until its admission
+  deadline.
 - `CertificationPolicy` is cluster-scoped qualification policy: it defines
   which terminal Runs count, how many are required, how qualification expires,
   and how non-passing evidence affects prior credit.
@@ -452,8 +458,10 @@ are retained only in the durable evidence document.
 ## Qualification policy and ledger contract
 
 A Suite and Profile describe one execution. They do not describe a recurring
-campaign or a production qualification gate. Each request creates one
-independent immutable Run. Project Signal has no Campaign CR.
+production qualification gate. Each request creates one independent immutable
+Run. A `CertificationCampaignPolicy` can enroll matching Ready Nodes into
+bounded `CertificationCampaign` executions that repeatedly request the same
+Profile while preserving every Run independently.
 
 A `CertificationPolicy` evaluates terminal Run evidence into one
 `NodeCertification` ledger per exact Node UID. Policy requirements select a
@@ -525,6 +533,66 @@ If that execution is interrupted, a replacement starts a new duration from
 zero. Multiple shorter Runs do not prove one uninterrupted duration unless a
 Policy explicitly defines a repeated-Run requirement, and even then they remain
 separate credited executions rather than a continuous observation.
+
+## Initial validation campaigns
+
+An initial validation campaign repeatedly executes one Profile for a bounded
+window. It never overlaps Runs for the same participant and never rewrites or
+collapses evidence. The controller:
+
+1. creates one `CertificationCampaign` for each matching Ready Node and exact
+   Node UID;
+2. requests one full immutable Run;
+3. waits for durable evidence, workload cleanup, and participant release;
+4. records the terminal outcome and requests the next Run; and
+5. stops admitting new Runs at the campaign deadline while allowing an active
+   Run to finish and release.
+
+Failed, inconclusive, and canceled Runs are automatically released after their
+evidence is durable so the campaign can continue. Set `spec.stop: true` on the
+Campaign to stop new admissions early; an active Run still finishes normally.
+Deleting or changing the Policy does not mutate an already-created Campaign.
+
+Create an opt-in 24-hour node-join policy after the referenced Profile exists:
+
+```yaml
+apiVersion: signal.unbounded-cloud.io/v1alpha1
+kind: CertificationCampaignPolicy
+metadata:
+  name: initial-validation
+spec:
+  profile:
+    name: complete-certification
+  nodeSelector:
+    matchLabels:
+      signal.unbounded-cloud.io/initial-validation: "true"
+  trigger: OnNodeReady
+  duration: 24h
+```
+
+The selector is evaluated whenever a Node or Policy changes. Therefore, a
+matching Node that is already Ready is enrolled when the Policy is introduced;
+a newly joined matching Node is enrolled on its first observed Ready state.
+The deterministic Campaign identity prevents controller restarts from creating
+another campaign for the same Policy UID and Node UID.
+
+Inspect campaign progress and retained Runs:
+
+```bash
+kubectl get certificationcampaigns -n project-signal
+kubectl get certificationruns -n project-signal \
+  -l signal.unbounded-cloud.io/campaign=<campaign-name>
+```
+
+The controller exports:
+
+- `project_signal_certification_campaign_info`;
+- `project_signal_certification_campaign_runs`; and
+- `project_signal_certification_campaign_deadline_timestamp_seconds`.
+
+Qualification remains separate. Use `CertificationPolicy.requiredPassCount`
+and optional `minRunSeparation` when multiple successful campaign Runs must
+contribute to qualification.
 
 ## Bounded vLLM acceptance canary
 

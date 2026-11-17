@@ -54,6 +54,11 @@ const (
 	RunTriggerAnnotation       = "signal.unbounded-cloud.io/trigger"
 	RunAdmissionAnnotation     = "signal.unbounded-cloud.io/admission"
 	RunStartIdentityAnnotation = "signal.unbounded-cloud.io/start-fingerprints"
+	CampaignRequestName        = "signal.unbounded-cloud.io/campaign"
+	CampaignRequestUID         = "signal.unbounded-cloud.io/campaign-uid"
+	CampaignRequestSequence    = "signal.unbounded-cloud.io/campaign-sequence"
+	RunCampaignLabel           = "signal.unbounded-cloud.io/campaign"
+	RunCampaignUIDLabel        = "signal.unbounded-cloud.io/campaign-uid"
 	ExecutionAuthorityName     = "project-signal-execution-authority"
 	ExecutionStateName         = "project-signal-execution-state"
 	RunFinalizer               = "signal.unbounded-cloud.io/cleanup"
@@ -723,6 +728,17 @@ func (r *AdmissionReconciler) admitNode(ctx context.Context, node *corev1.Node, 
 		return fmt.Errorf("get CertificationProfile %s: %w", profileName, err)
 	}
 
+	campaignIdentity, err := campaignIdentityFromNode(
+		ctx,
+		r.APIReader,
+		r.Namespace,
+		node,
+		r.now(),
+	)
+	if err != nil {
+		return err
+	}
+
 	suite, checks, err := r.resolveSuite(ctx, &profile)
 	if err != nil {
 		return err
@@ -870,6 +886,13 @@ func (r *AdmissionReconciler) admitNode(ctx context.Context, node *corev1.Node, 
 
 	if err != nil {
 		return fmt.Errorf("build immutable CertificationRun execution plan: %w", err)
+	}
+
+	if campaignIdentity != nil {
+		run.Spec.Campaign = campaignIdentity
+		run.Labels[RunCampaignLabel] = campaignIdentity.Name
+		run.Labels[RunCampaignUIDLabel] = string(campaignIdentity.UID)
+		run.Annotations[RunTriggerAnnotation] = "campaign"
 	}
 
 	if _, err := buildWorkflow(run); err != nil {
@@ -3595,36 +3618,6 @@ func (r *RunReconciler) readStageResult(
 	return &summary, runnerImages, nil
 }
 
-func (r *RunReconciler) readPinnedCertificationTest(
-	ctx context.Context,
-	identity signalv1.TestIdentitySnapshot,
-) (*signalv1.CertificationTest, error) {
-	reader := r.APIReader
-	if reader == nil {
-		reader = r.Client
-	}
-
-	var test signalv1.CertificationTest
-	if err := reader.Get(ctx, client.ObjectKey{Name: identity.Name}, &test); err != nil {
-		return nil, fmt.Errorf("read pinned CertificationTest: %w", err)
-	}
-
-	if test.UID != identity.UID ||
-		test.Generation != identity.Generation ||
-		test.Status.ObservedGeneration != identity.Generation ||
-		test.Status.Trust == nil ||
-		test.Status.Trust.State != identity.Trust ||
-		test.Status.Trust.ContentDigest != identity.ContentDigest {
-		return nil, errors.New("CertificationTest no longer matches the immutable Run identity")
-	}
-
-	if err := signalv1.ValidateTestArtifacts(test.Spec); err != nil {
-		return nil, fmt.Errorf("CertificationTest artifacts are invalid: %w", err)
-	}
-
-	return &test, nil
-}
-
 func stageRunnerImageProvenance(
 	value string,
 	driver signalv1.CertificationTestDriver,
@@ -5423,6 +5416,7 @@ func mergeResolvedQualificationFingerprint(
 	}
 
 	current.Start.DriverVersion = observed.Start.DriverVersion
+
 	current.End.DriverVersion = observed.End.DriverVersion
 	if current.Start.GPUInventoryDigest == "" {
 		current.Start.GPUInventoryDigest = observed.Start.GPUInventoryDigest
@@ -6356,6 +6350,9 @@ func (r *RunReconciler) clearRequest(ctx context.Context, run *signalv1.Certific
 
 	before := node.DeepCopy()
 	delete(node.Labels, RequestLabel)
+	delete(node.Annotations, CampaignRequestName)
+	delete(node.Annotations, CampaignRequestUID)
+	delete(node.Annotations, CampaignRequestSequence)
 
 	return r.Patch(ctx, &node, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))
 }

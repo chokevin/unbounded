@@ -139,6 +139,7 @@ func TestCertificationMetricsCollectorPublishesRetainedRunCompletion(t *testing.
 	}
 
 	families := gatherCertificationMetrics(t, run)
+
 	completions := families["project_signal_fleet_certification_run_finished_timestamp_seconds"]
 	if completions == nil || len(completions.Metric) != 1 {
 		t.Fatalf("run completion metrics = %#v, want one", completions)
@@ -157,6 +158,59 @@ func TestCertificationMetricsCollectorPublishesRetainedRunCompletion(t *testing.
 		"suite":     "suite-v1",
 		"phase":     "Succeeded",
 	})
+}
+
+func TestCertificationMetricsCollectorPublishesCampaignHistory(t *testing.T) {
+	t.Parallel()
+
+	deadline := metav1.NewTime(time.Date(2026, time.November, 18, 22, 0, 0, 0, time.UTC))
+	campaign := &signalv1.CertificationCampaign{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "initial-validation",
+			Namespace: "project-signal",
+		},
+		Spec: signalv1.CertificationCampaignSpec{
+			Profile:  signalv1.PinnedProfile{Name: "complete-profile"},
+			NodeName: "participant-0",
+			NodeUID:  types.UID("node-uid"),
+			Deadline: deadline,
+		},
+		Status: signalv1.CertificationCampaignStatus{
+			Phase:            signalv1.CampaignPhaseRunning,
+			StartedRuns:      4,
+			SucceededRuns:    2,
+			FailedRuns:       1,
+			InconclusiveRuns: 1,
+		},
+	}
+
+	families := gatherCertificationMetricsObjects(t, campaign)
+
+	info := families["project_signal_certification_campaign_info"]
+	if info == nil || len(info.Metric) != 1 || info.Metric[0].Gauge.GetValue() != 1 {
+		t.Fatalf("campaign info = %#v", info)
+	}
+
+	assertMetricLabels(t, info.Metric[0], map[string]string{
+		"namespace": "project-signal",
+		"campaign":  "initial-validation",
+		"node":      "participant-0",
+		"node_uid":  "node-uid",
+		"profile":   "complete-profile",
+		"phase":     "Running",
+	})
+
+	runs := families["project_signal_certification_campaign_runs"]
+	if runs == nil || len(runs.Metric) != 5 {
+		t.Fatalf("campaign run metrics = %#v, want 5", runs)
+	}
+
+	deadlineMetric := families["project_signal_certification_campaign_deadline_timestamp_seconds"]
+	if deadlineMetric == nil ||
+		len(deadlineMetric.Metric) != 1 ||
+		deadlineMetric.Metric[0].Gauge.GetValue() != float64(deadline.Unix()) {
+		t.Fatalf("campaign deadline = %#v", deadlineMetric)
+	}
 }
 
 func TestCertificationMetricsCollectorPublishesLatestNodeStatusAndStage(t *testing.T) {
@@ -424,14 +478,23 @@ func gatherCertificationMetrics(
 ) map[string]*dto.MetricFamily {
 	t.Helper()
 
-	scheme := runtime.NewScheme()
-	if err := signalv1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-
 	objects := make([]runtime.Object, len(runs))
 	for index := range runs {
 		objects[index] = runs[index]
+	}
+
+	return gatherCertificationMetricsObjects(t, objects...)
+}
+
+func gatherCertificationMetricsObjects(
+	t *testing.T,
+	objects ...runtime.Object,
+) map[string]*dto.MetricFamily {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := signalv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
 	}
 
 	reader := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()

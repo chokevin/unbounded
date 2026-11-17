@@ -1059,6 +1059,41 @@ func TestCertificationPolicyContract(t *testing.T) {
 	}
 }
 
+func TestCertificationCampaignContract(t *testing.T) {
+	t.Parallel()
+
+	policy := readCRD(t, "signal.unbounded-cloud.io_certificationcampaignpolicies.yaml")
+	if policy.Spec.Scope != apiextensionsv1.ClusterScoped {
+		t.Fatalf("CampaignPolicy scope = %s, want Cluster", policy.Spec.Scope)
+	}
+
+	policySpec := policy.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+	if !hasValidationRule(&policySpec, "duration(self.duration) > duration('0s')") {
+		t.Fatal("CampaignPolicy does not require a positive duration")
+	}
+
+	if !hasValidationRule(&policySpec, "duration(self.duration) <= duration('168h')") {
+		t.Fatal("CampaignPolicy does not bound duration")
+	}
+
+	campaign := readCRD(t, "signal.unbounded-cloud.io_certificationcampaigns.yaml")
+	if campaign.Spec.Scope != apiextensionsv1.NamespaceScoped {
+		t.Fatalf("Campaign scope = %s, want Namespaced", campaign.Spec.Scope)
+	}
+
+	campaignVersion := campaign.Spec.Versions[0]
+	if campaignVersion.Subresources == nil || campaignVersion.Subresources.Status == nil {
+		t.Fatal("Campaign status subresource is not enabled")
+	}
+
+	campaignSchema := campaignVersion.Schema.OpenAPIV3Schema
+
+	spec := campaignSchema.Properties["spec"]
+	if !hasValidationRule(&spec, "!has(oldSelf.stop) || !oldSelf.stop || (has(self.stop) && self.stop)") {
+		t.Fatal("Campaign stop action is not monotonic")
+	}
+}
+
 func TestNodeQualificationLabelContract(t *testing.T) {
 	t.Parallel()
 

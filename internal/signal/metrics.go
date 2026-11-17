@@ -27,6 +27,9 @@ type CertificationMetricsCollector struct {
 	r07MinimumAssertion  *prometheus.Desc
 	liveStageVerdict     *prometheus.Desc
 	nodeStatus           *prometheus.Desc
+	campaignInfo         *prometheus.Desc
+	campaignRuns         *prometheus.Desc
+	campaignDeadline     *prometheus.Desc
 }
 
 func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetricsCollector {
@@ -73,6 +76,24 @@ func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetric
 			},
 			nil,
 		),
+		campaignInfo: prometheus.NewDesc(
+			"project_signal_certification_campaign_info",
+			"Current state of a bounded CertificationCampaign.",
+			[]string{"namespace", "campaign", "node", "node_uid", "profile", "phase"},
+			nil,
+		),
+		campaignRuns: prometheus.NewDesc(
+			"project_signal_certification_campaign_runs",
+			"Persisted Run counts for a bounded CertificationCampaign.",
+			[]string{"namespace", "campaign", "outcome"},
+			nil,
+		),
+		campaignDeadline: prometheus.NewDesc(
+			"project_signal_certification_campaign_deadline_timestamp_seconds",
+			"Unix timestamp after which a CertificationCampaign stops admitting new Runs.",
+			[]string{"namespace", "campaign"},
+			nil,
+		),
 	}
 }
 
@@ -86,6 +107,12 @@ func (c *CertificationMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.liveStageVerdict
 
 	ch <- c.nodeStatus
+
+	ch <- c.campaignInfo
+
+	ch <- c.campaignRuns
+
+	ch <- c.campaignDeadline
 }
 
 func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -129,6 +156,66 @@ func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, status := range latestRuns {
 		c.collectNodeStatus(status.run, status.participantIndex, ch)
 	}
+
+	var campaigns signalv1.CertificationCampaignList
+	if err := c.reader.List(ctx, &campaigns); err != nil {
+		ch <- prometheus.NewInvalidMetric(
+			c.campaignInfo,
+			fmt.Errorf("list CertificationCampaigns: %w", err),
+		)
+
+		return
+	}
+
+	for index := range campaigns.Items {
+		c.collectCampaign(&campaigns.Items[index], ch)
+	}
+}
+
+func (c *CertificationMetricsCollector) collectCampaign(
+	campaign *signalv1.CertificationCampaign,
+	ch chan<- prometheus.Metric,
+) {
+	ch <- prometheus.MustNewConstMetric(
+		c.campaignInfo,
+		prometheus.GaugeValue,
+		1,
+		campaign.Namespace,
+		campaign.Name,
+		campaign.Spec.NodeName,
+		string(campaign.Spec.NodeUID),
+		campaign.Spec.Profile.Name,
+		string(campaign.Status.Phase),
+	)
+
+	counts := []struct {
+		outcome string
+		value   int32
+	}{
+		{outcome: "started", value: campaign.Status.StartedRuns},
+		{outcome: "succeeded", value: campaign.Status.SucceededRuns},
+		{outcome: "failed", value: campaign.Status.FailedRuns},
+		{outcome: "inconclusive", value: campaign.Status.InconclusiveRuns},
+		{outcome: "canceled", value: campaign.Status.CanceledRuns},
+	}
+	for _, count := range counts {
+		ch <- prometheus.MustNewConstMetric(
+			c.campaignRuns,
+			prometheus.GaugeValue,
+			float64(count.value),
+			campaign.Namespace,
+			campaign.Name,
+			count.outcome,
+		)
+	}
+
+	ch <- prometheus.MustNewConstMetric(
+		c.campaignDeadline,
+		prometheus.GaugeValue,
+		float64(campaign.Spec.Deadline.Unix()),
+		campaign.Namespace,
+		campaign.Name,
+	)
 }
 
 func (c *CertificationMetricsCollector) collectRunFinishedTimestamp(
