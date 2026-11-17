@@ -3584,14 +3584,9 @@ func (r *RunReconciler) readStageResult(
 		return nil, nil, err
 	}
 
-	test, err := r.readPinnedCertificationTest(ctx, stage.Test.Identity)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	runnerImages, err := stageRunnerImageProvenance(
 		result.Annotations[stageResultRunnerImages],
-		test.Spec.Driver,
+		stage.Test.Driver,
 	)
 	if err != nil {
 		return nil, nil, err
