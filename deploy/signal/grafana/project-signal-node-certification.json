@@ -178,7 +178,7 @@
       },
       "id": 10,
       "panels": [],
-      "title": "Certification pipeline - R01-R20",
+      "title": "Certification pipeline - R01-R21",
       "type": "row"
     },
     {
@@ -451,14 +451,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r15-gpu-burn|r16-gpu-one-device|r18-dcgm-telemetry\"}) or label_replace(vector(0), \"stage\", \"r15-gpu-burn\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r16-gpu-one-device\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r18-dcgm-telemetry\", \"\", \"\")",
+          "expr": "sum by (stage) (project_signal_node_certification_status{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", status=~\"${status:regex}\", stage=~\"r15-gpu-burn|r16-gpu-one-device|r18-dcgm-telemetry|r21-hbm-correctness\"}) or label_replace(vector(0), \"stage\", \"r15-gpu-burn\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r16-gpu-one-device\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r18-dcgm-telemetry\", \"\", \"\") or label_replace(vector(0), \"stage\", \"r21-hbm-correctness\", \"\", \"\")",
           "instant": true,
           "legendFormat": "{{stage}}",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Runtime, burn-in, telemetry - R15-R16, R18",
+      "title": "Runtime, burn-in, telemetry, HBM - R15-R16, R18, R21",
       "type": "bargauge"
     },
     {
@@ -526,6 +526,242 @@
         "y": 20
       },
       "id": 11,
+      "panels": [],
+      "title": "Inference performance",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "AIPerf per-user output token throughput from immutable completed R19 and R20 stage evidence. Use the Run filter to compare specific certification datapoints.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "suffix: tok/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "id": 12,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "project_signal_fleet_certification_measurement{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", run=~\"${run:regex}\", stage=~\"r19-qwen38-flash-vllm|r20-deepseek-v41-flash-vllm\", metric_id=\"outputTokensPerSecond\"} > 0",
+          "instant": true,
+          "legendFormat": "{{stage}} - {{run}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Output throughput",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "AIPerf time to first token from immutable completed R19 and R20 stage evidence. Lower is better; use the Run filter to compare specific certification datapoints.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-RdYlGr"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "id": 13,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "project_signal_fleet_certification_measurement{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", run=~\"${run:regex}\", stage=~\"r19-qwen38-flash-vllm|r20-deepseek-v41-flash-vllm\", metric_id=\"timeToFirstToken\"} > 0",
+          "instant": true,
+          "legendFormat": "{{stage}} - {{run}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Time to first token",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 15,
+      "panels": [],
+      "title": "Certification history",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Count of retained CertificationRuns whose immutable evidence finished during the past 24 hours.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 29
+      },
+      "id": 16,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count by (phase) (project_signal_fleet_certification_run_finished_timestamp_seconds{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"} > time() - 86400)",
+          "instant": true,
+          "legendFormat": "{{phase}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Runs completed - past 24 hours",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Rolling 24-hour completion count from retained immutable certification records.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 8,
+        "y": 29
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count by (phase) (project_signal_fleet_certification_run_finished_timestamp_seconds{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"} > time() - 86400)",
+          "instant": false,
+          "legendFormat": "{{phase}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rolling certification completions",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "id": 14,
       "panels": [],
       "title": "Per-node certification",
       "type": "row"
@@ -653,7 +889,7 @@
         "h": 20,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 37
       },
       "id": 3,
       "options": {
@@ -854,6 +1090,32 @@
         "refresh": 2,
         "regex": "",
         "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(project_signal_fleet_certification_run_finished_timestamp_seconds{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"}, run)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Run",
+        "multi": true,
+        "name": "run",
+        "options": [],
+        "query": {
+          "query": "label_values(project_signal_fleet_certification_run_finished_timestamp_seconds{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"}, run)",
+          "refId": "PrometheusVariableQueryEditor-Run"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 3,
         "type": "query"
       }
     ]

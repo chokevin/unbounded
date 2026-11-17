@@ -23,6 +23,7 @@ var gpuTflopsMetricPattern = regexp.MustCompile(`^gpu([0-7])MinTflops$`)
 type CertificationMetricsCollector struct {
 	reader               client.Reader
 	completedMeasurement *prometheus.Desc
+	runFinishedTimestamp *prometheus.Desc
 	r07MinimumAssertion  *prometheus.Desc
 	liveStageVerdict     *prometheus.Desc
 	nodeStatus           *prometheus.Desc
@@ -35,6 +36,12 @@ func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetric
 			"project_signal_fleet_certification_measurement",
 			"Numeric measurement projected from immutable completed stage evidence.",
 			[]string{"namespace", "run", "run_uid", "stage", "metric_id", "unit"},
+			nil,
+		),
+		runFinishedTimestamp: prometheus.NewDesc(
+			"project_signal_fleet_certification_run_finished_timestamp_seconds",
+			"Unix timestamp when a retained CertificationRun finished.",
+			[]string{"namespace", "run", "run_uid", "profile", "suite", "phase"},
 			nil,
 		),
 		r07MinimumAssertion: prometheus.NewDesc(
@@ -72,6 +79,8 @@ func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetric
 func (c *CertificationMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.completedMeasurement
 
+	ch <- c.runFinishedTimestamp
+
 	ch <- c.r07MinimumAssertion
 
 	ch <- c.liveStageVerdict
@@ -98,6 +107,7 @@ func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	for runIndex := range runs.Items {
 		run := &runs.Items[runIndex]
 		c.collectRun(run, ch)
+		c.collectRunFinishedTimestamp(run, ch)
 		c.collectLiveStageVerdicts(run, ch)
 
 		for participantIndex := range run.Spec.Participants {
@@ -119,6 +129,32 @@ func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, status := range latestRuns {
 		c.collectNodeStatus(status.run, status.participantIndex, ch)
 	}
+}
+
+func (c *CertificationMetricsCollector) collectRunFinishedTimestamp(
+	run *signalv1.CertificationRun,
+	ch chan<- prometheus.Metric,
+) {
+	if !run.Status.Phase.Terminal() || run.Status.Evidence.Identity == nil {
+		return
+	}
+
+	finishedAt := identityFinishedAt(run.Status.Evidence.Identity)
+	if finishedAt.IsZero() {
+		return
+	}
+
+	ch <- prometheus.MustNewConstMetric(
+		c.runFinishedTimestamp,
+		prometheus.GaugeValue,
+		float64(finishedAt.Unix()),
+		run.Namespace,
+		run.Name,
+		string(run.UID),
+		run.Spec.Profile.Name,
+		run.Spec.Suite.Name,
+		string(run.Status.Phase),
+	)
 }
 
 func (c *CertificationMetricsCollector) collectLiveStageVerdicts(

@@ -1643,14 +1643,14 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 
 	if dashboard.UID != "project-signal-fleet-certification" ||
 		dashboard.Refresh != "15s" ||
-		len(dashboard.Panels) != 11 {
+		len(dashboard.Panels) != 17 {
 		t.Fatalf("dashboard identity = %#v", dashboard)
 	}
 
 	foundFleetMatrix := false
 	contentString := string(content)
 
-	for stage := 1; stage <= 20; stage++ {
+	for stage := 1; stage <= 21; stage++ {
 		if !strings.Contains(contentString, fmt.Sprintf("r%02d-", stage)) {
 			t.Fatalf("Grafana dashboard does not contain R%02d", stage)
 		}
@@ -1663,6 +1663,10 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 		"Host and storage",
 		"Runtime, burn-in, telemetry",
 		"Inference serving",
+		"Inference performance",
+		"Certification history",
+		"Runs completed - past 24 hours",
+		"Rolling certification completions",
 	} {
 		if !strings.Contains(contentString, title) {
 			t.Fatalf("Grafana dashboard does not contain group %q", title)
@@ -1687,6 +1691,29 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 
 	if !foundFleetMatrix {
 		t.Fatal("Grafana dashboard does not contain the node certification matrix query")
+	}
+
+	for _, metric := range []string{"outputTokensPerSecond", "timeToFirstToken"} {
+		if !strings.Contains(contentString, `metric_id=\"`+metric+`\"`) {
+			t.Fatalf("Grafana dashboard does not contain serving metric %q", metric)
+		}
+	}
+
+	if strings.Count(
+		contentString,
+		"project_signal_fleet_certification_run_finished_timestamp_seconds",
+	) < 4 ||
+		!strings.Contains(contentString, "time() - 86400") {
+		t.Fatal("Grafana dashboard does not contain retained 24-hour certification history")
+	}
+
+	if !strings.Contains(contentString, `"name": "run"`) {
+		t.Fatal("Grafana dashboard does not contain the serving Run filter")
+	}
+
+	if strings.Contains(contentString, "project_signal_fleet_certification_participant_info") ||
+		strings.Contains(contentString, "project_signal_fleet_certification_run_created_timestamp_seconds") {
+		t.Fatal("Grafana dashboard joins verdicts through unavailable compatibility metrics")
 	}
 }
 

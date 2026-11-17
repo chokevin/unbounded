@@ -124,6 +124,41 @@ func TestCertificationMetricsCollectorOmitsMissingMeasurements(t *testing.T) {
 	}
 }
 
+func TestCertificationMetricsCollectorPublishesRetainedRunCompletion(t *testing.T) {
+	t.Parallel()
+
+	finishedAt := metav1.NewTime(time.Date(2026, time.November, 17, 18, 25, 37, 0, time.UTC))
+	run := certificationStatusRun(
+		"retained-run",
+		"2026-11-17T18:00:00Z",
+		signalv1.RunPhaseSucceeded,
+		[]signalv1.CheckPhase{signalv1.CheckPhaseSucceeded, signalv1.CheckPhaseSucceeded},
+	)
+	run.Status.Evidence.Identity = &signalv1.QualificationEvidenceIdentity{
+		Stages: []signalv1.StageEvidenceSummary{{FinishedAt: finishedAt}},
+	}
+
+	families := gatherCertificationMetrics(t, run)
+	completions := families["project_signal_fleet_certification_run_finished_timestamp_seconds"]
+	if completions == nil || len(completions.Metric) != 1 {
+		t.Fatalf("run completion metrics = %#v, want one", completions)
+	}
+
+	metric := completions.Metric[0]
+	if metric.Gauge == nil || metric.Gauge.GetValue() != float64(finishedAt.Unix()) {
+		t.Fatalf("finished timestamp = %#v, want %d", metric.Gauge, finishedAt.Unix())
+	}
+
+	assertMetricLabels(t, metric, map[string]string{
+		"namespace": "project-signal",
+		"run":       "retained-run",
+		"run_uid":   "retained-run-uid",
+		"profile":   "profile-v1",
+		"suite":     "suite-v1",
+		"phase":     "Succeeded",
+	})
+}
+
 func TestCertificationMetricsCollectorPublishesLatestNodeStatusAndStage(t *testing.T) {
 	t.Parallel()
 
