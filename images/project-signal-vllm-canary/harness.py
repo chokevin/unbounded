@@ -354,11 +354,11 @@ def run_aiperf(model_cache, timeout):
         ) from error
 
     return {
-        "promptTokens": result["promptTokens"],
-        "completionTokens": result["completionTokens"],
-        "endToEndLatency": result["endToEndLatencyMs"] / 1000,
+        "promptTokens": result["inputSequenceLength"],
+        "completionTokens": result["outputSequenceLength"],
+        "endToEndLatency": result["requestLatencyMs"] / 1000,
         "timeToFirstToken": result["timeToFirstTokenMs"] / 1000,
-        "outputTokensPerSecond": result["outputTokensPerSecond"],
+        "outputTokensPerSecond": result["outputTokenThroughputPerUser"],
     }
 
 

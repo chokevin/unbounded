@@ -282,11 +282,11 @@ def run_profile(
         "schemaVersion": summary["schema_version"],
         "requestCount": int(request_count),
         "errorCount": int(error_count),
-        "promptTokens": int(metric(summary, "input_sequence_length", "tokens")),
-        "completionTokens": int(metric(summary, "output_sequence_length", "tokens")),
-        "endToEndLatencyMs": metric(summary, "request_latency", "ms"),
+        "inputSequenceLength": int(metric(summary, "input_sequence_length", "tokens")),
+        "outputSequenceLength": int(metric(summary, "output_sequence_length", "tokens")),
+        "requestLatencyMs": metric(summary, "request_latency", "ms"),
         "timeToFirstTokenMs": metric(summary, "time_to_first_token", "ms"),
-        "outputTokensPerSecond": metric(
+        "outputTokenThroughputPerUser": metric(
             summary,
             "output_token_throughput_per_user",
             "tokens/sec/user",

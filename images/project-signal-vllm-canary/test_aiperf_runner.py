@@ -48,11 +48,11 @@ class AIPerfRunnerTest(unittest.TestCase):
         self.assertIn("--tokenizer-revision", command)
         self.assertEqual(result["requestCount"], 4)
         self.assertEqual(result["errorCount"], 0)
-        self.assertEqual(result["promptTokens"], 9)
-        self.assertEqual(result["completionTokens"], 8)
-        self.assertEqual(result["endToEndLatencyMs"], 794.5)
+        self.assertEqual(result["inputSequenceLength"], 9)
+        self.assertEqual(result["outputSequenceLength"], 8)
+        self.assertEqual(result["requestLatencyMs"], 794.5)
         self.assertEqual(result["timeToFirstTokenMs"], 550.4)
-        self.assertEqual(result["outputTokensPerSecond"], 311.8)
+        self.assertEqual(result["outputTokenThroughputPerUser"], 311.8)
 
     def test_run_profile_rejects_incomplete_requests(self):
         invalid = summary()
