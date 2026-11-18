@@ -1755,6 +1755,10 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 		}
 	}
 
+	if !strings.Contains(string(content), `phase=~\"pending|running\"`) {
+		t.Fatal("node dashboard Active Run filter does not exclude retained terminal Runs")
+	}
+
 	if strings.Contains(contentString, "project_signal_fleet_certification_run_created_timestamp_seconds") {
 		t.Fatal("Grafana dashboard joins verdicts through unavailable compatibility metrics")
 	}

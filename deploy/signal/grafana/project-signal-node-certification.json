@@ -1909,7 +1909,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "query_result(sort_desc(max by (run) (timestamp(project_signal_fleet_certification_live_stage_verdict{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"}))))",
+        "definition": "query_result(sort_desc(max by (run) ((timestamp(project_signal_fleet_certification_live_stage_verdict{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"}) and on (namespace, run, run_uid) (project_signal_fleet_certification_run_phase{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", phase=~\"pending|running\"} == 1)) * on (namespace, run, run_uid) group_left (node) project_signal_fleet_certification_run_participant_info{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", node=~\"${node:regex}\"})))",
         "hide": 0,
         "includeAll": false,
         "label": "Active Run",
@@ -1917,7 +1917,7 @@
         "name": "active_run",
         "options": [],
         "query": {
-          "query": "query_result(sort_desc(max by (run) (timestamp(project_signal_fleet_certification_live_stage_verdict{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"}) * on (namespace, run, run_uid) group_left (node) project_signal_fleet_certification_run_participant_info{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", node=~\"${node:regex}\"})))",
+          "query": "query_result(sort_desc(max by (run) ((timestamp(project_signal_fleet_certification_live_stage_verdict{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\"}) and on (namespace, run, run_uid) (project_signal_fleet_certification_run_phase{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", phase=~\"pending|running\"} == 1)) * on (namespace, run, run_uid) group_left (node) project_signal_fleet_certification_run_participant_info{cluster=~\"${cluster:regex}\", namespace=~\"${namespace:regex}\", node=~\"${node:regex}\"})))",
           "refId": "PrometheusVariableQueryEditor-active_run"
         },
         "refresh": 2,
