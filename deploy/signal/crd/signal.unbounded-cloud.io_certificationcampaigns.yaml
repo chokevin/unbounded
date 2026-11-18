@@ -117,6 +117,29 @@ spec:
                   Stop prevents new Runs from being admitted. An active Run is allowed to
                   finish and release normally.
                 type: boolean
+              suite:
+                properties:
+                  generation:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  name:
+                    minLength: 1
+                    type: string
+                  uid:
+                    description: |-
+                      UID is a type that holds unique ID values, including UUIDs.  Because we
+                      don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                      intent and helps make sure that UIDs and names do not get conflated.
+                    type: string
+                required:
+                - generation
+                - name
+                - uid
+                type: object
+                x-kubernetes-validations:
+                - message: uid is required
+                  rule: size(self.uid) > 0
             required:
             - deadline
             - nodeName
@@ -124,12 +147,15 @@ spec:
             - policy
             - profile
             - startedAt
+            - suite
             type: object
             x-kubernetes-validations:
             - message: policy is immutable
               rule: self.policy == oldSelf.policy
             - message: profile is immutable
               rule: self.profile == oldSelf.profile
+            - message: suite is immutable
+              rule: self.suite == oldSelf.suite
             - message: nodeName is immutable
               rule: self.nodeName == oldSelf.nodeName
             - message: nodeUID is immutable

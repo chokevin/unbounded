@@ -728,18 +728,20 @@ func (r *AdmissionReconciler) admitNode(ctx context.Context, node *corev1.Node, 
 		return fmt.Errorf("get CertificationProfile %s: %w", profileName, err)
 	}
 
+	suite, checks, err := r.resolveSuite(ctx, &profile)
+	if err != nil {
+		return err
+	}
+
 	campaignIdentity, err := campaignIdentityFromNode(
 		ctx,
 		r.APIReader,
 		r.Namespace,
 		node,
+		&profile,
+		suite,
 		r.now(),
 	)
-	if err != nil {
-		return err
-	}
-
-	suite, checks, err := r.resolveSuite(ctx, &profile)
 	if err != nil {
 		return err
 	}

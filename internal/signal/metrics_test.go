@@ -171,6 +171,7 @@ func TestCertificationMetricsCollectorPublishesCampaignHistory(t *testing.T) {
 		},
 		Spec: signalv1.CertificationCampaignSpec{
 			Profile:  signalv1.PinnedProfile{Name: "complete-profile"},
+			Suite:    signalv1.PinnedSuite{Name: "complete-suite"},
 			NodeName: "participant-0",
 			NodeUID:  types.UID("node-uid"),
 			Deadline: deadline,
@@ -197,6 +198,7 @@ func TestCertificationMetricsCollectorPublishesCampaignHistory(t *testing.T) {
 		"node":      "participant-0",
 		"node_uid":  "node-uid",
 		"profile":   "complete-profile",
+		"suite":     "complete-suite",
 		"phase":     "Running",
 	})
 

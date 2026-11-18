@@ -542,7 +542,8 @@ collapses evidence. The controller:
 
 1. creates one `CertificationCampaign` for each matching Ready Node and exact
    Node UID;
-2. requests one full immutable Run;
+2. pins the current Profile and Suite identities and requests one full
+   immutable Run;
 3. waits for durable evidence, workload cleanup, and participant release;
 4. records the terminal outcome and requests the next Run; and
 5. stops admitting new Runs at the campaign deadline while allowing an active
@@ -552,6 +553,8 @@ Failed, inconclusive, and canceled Runs are automatically released after their
 evidence is durable so the campaign can continue. Set `spec.stop: true` on the
 Campaign to stop new admissions early; an active Run still finishes normally.
 Deleting or changing the Policy does not mutate an already-created Campaign.
+Changing or replacing the pinned Profile or Suite blocks new campaign Runs
+rather than mixing different plans in one campaign history.
 
 Create an opt-in 24-hour node-join policy after the referenced Profile exists:
 

@@ -1092,6 +1092,10 @@ func TestCertificationCampaignContract(t *testing.T) {
 	if !hasValidationRule(&spec, "!has(oldSelf.stop) || !oldSelf.stop || (has(self.stop) && self.stop)") {
 		t.Fatal("Campaign stop action is not monotonic")
 	}
+
+	if !hasValidationRule(&spec, "self.suite == oldSelf.suite") {
+		t.Fatal("Campaign Suite identity is not immutable")
+	}
 }
 
 func TestNodeQualificationLabelContract(t *testing.T) {

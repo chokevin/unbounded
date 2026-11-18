@@ -79,7 +79,7 @@ func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetric
 		campaignInfo: prometheus.NewDesc(
 			"project_signal_certification_campaign_info",
 			"Current state of a bounded CertificationCampaign.",
-			[]string{"namespace", "campaign", "node", "node_uid", "profile", "phase"},
+			[]string{"namespace", "campaign", "node", "node_uid", "profile", "suite", "phase"},
 			nil,
 		),
 		campaignRuns: prometheus.NewDesc(
@@ -185,6 +185,7 @@ func (c *CertificationMetricsCollector) collectCampaign(
 		campaign.Spec.NodeName,
 		string(campaign.Spec.NodeUID),
 		campaign.Spec.Profile.Name,
+		campaign.Spec.Suite.Name,
 		string(campaign.Status.Phase),
 	)
 

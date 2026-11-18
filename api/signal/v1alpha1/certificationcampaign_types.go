@@ -69,6 +69,7 @@ type CampaignRunReference struct {
 
 // +kubebuilder:validation:XValidation:rule="self.policy == oldSelf.policy",message="policy is immutable"
 // +kubebuilder:validation:XValidation:rule="self.profile == oldSelf.profile",message="profile is immutable"
+// +kubebuilder:validation:XValidation:rule="self.suite == oldSelf.suite",message="suite is immutable"
 // +kubebuilder:validation:XValidation:rule="self.nodeName == oldSelf.nodeName",message="nodeName is immutable"
 // +kubebuilder:validation:XValidation:rule="self.nodeUID == oldSelf.nodeUID",message="nodeUID is immutable"
 // +kubebuilder:validation:XValidation:rule="self.startedAt == oldSelf.startedAt",message="startedAt is immutable"
@@ -77,6 +78,7 @@ type CampaignRunReference struct {
 type CertificationCampaignSpec struct {
 	Policy    PinnedCampaignPolicy `json:"policy"`
 	Profile   PinnedProfile        `json:"profile"`
+	Suite     PinnedSuite          `json:"suite"`
 	NodeName  string               `json:"nodeName"`
 	NodeUID   types.UID            `json:"nodeUID"`
 	StartedAt metav1.Time          `json:"startedAt"`

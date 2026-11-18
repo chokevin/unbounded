@@ -104,6 +104,19 @@ func (r *CampaignEnrollmentReconciler) ensureCampaign(
 	node *corev1.Node,
 	policy *signalv1.CertificationCampaignPolicy,
 ) error {
+	name := campaignName(policy.UID, node.UID)
+
+	var existing signalv1.CertificationCampaign
+
+	err := r.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: name}, &existing)
+	if err == nil {
+		return nil
+	}
+
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get CertificationCampaign %s: %w", name, err)
+	}
+
 	var profile signalv1.CertificationProfile
 	if err := r.Get(ctx, client.ObjectKey{Name: policy.Spec.Profile.Name}, &profile); err != nil {
 		return fmt.Errorf("get campaign Profile %s: %w", policy.Spec.Profile.Name, err)
@@ -119,17 +132,9 @@ func (r *CampaignEnrollmentReconciler) ensureCampaign(
 		)
 	}
 
-	name := campaignName(policy.UID, node.UID)
-
-	var existing signalv1.CertificationCampaign
-
-	err := r.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: name}, &existing)
-	if err == nil {
-		return nil
-	}
-
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("get CertificationCampaign %s: %w", name, err)
+	var suite signalv1.CertificationSuite
+	if err := r.Get(ctx, client.ObjectKey{Name: profile.Spec.Suite.Name}, &suite); err != nil {
+		return fmt.Errorf("get campaign Suite %s: %w", profile.Spec.Suite.Name, err)
 	}
 
 	now := r.now()
@@ -151,6 +156,11 @@ func (r *CampaignEnrollmentReconciler) ensureCampaign(
 				Name:       profile.Name,
 				UID:        profile.UID,
 				Generation: profile.Generation,
+			},
+			Suite: signalv1.PinnedSuite{
+				Name:       suite.Name,
+				UID:        suite.UID,
+				Generation: suite.Generation,
 			},
 			NodeName:  node.Name,
 			NodeUID:   node.UID,
@@ -343,6 +353,14 @@ func (r *CampaignReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.completeCampaign(ctx, &campaign)
 	}
 
+	if err := r.requirePinnedProfileAndSuite(ctx, &campaign); err != nil {
+		if clearErr := r.clearPendingRequest(ctx, &node, &campaign); clearErr != nil {
+			return ctrl.Result{}, clearErr
+		}
+
+		return r.blockCampaign(ctx, &campaign, "PlanDrift", err.Error())
+	}
+
 	if !nodeReady(&node) {
 		return r.blockCampaign(ctx, &campaign, "NodeNotReady", "The campaign node is not Ready")
 	}
@@ -389,6 +407,34 @@ func (r *CampaignReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
+func (r *CampaignReconciler) requirePinnedProfileAndSuite(
+	ctx context.Context,
+	campaign *signalv1.CertificationCampaign,
+) error {
+	var profile signalv1.CertificationProfile
+	if err := r.Get(ctx, client.ObjectKey{Name: campaign.Spec.Profile.Name}, &profile); err != nil {
+		return fmt.Errorf("get pinned Profile: %w", err)
+	}
+
+	if profile.UID != campaign.Spec.Profile.UID ||
+		profile.Generation != campaign.Spec.Profile.Generation ||
+		profile.Spec.Suite.Name != campaign.Spec.Suite.Name {
+		return errors.New("the campaign Profile no longer matches its pinned identity")
+	}
+
+	var suite signalv1.CertificationSuite
+	if err := r.Get(ctx, client.ObjectKey{Name: campaign.Spec.Suite.Name}, &suite); err != nil {
+		return fmt.Errorf("get pinned Suite: %w", err)
+	}
+
+	if suite.UID != campaign.Spec.Suite.UID ||
+		suite.Generation != campaign.Spec.Suite.Generation {
+		return errors.New("the campaign Suite no longer matches its pinned identity")
+	}
+
+	return nil
 }
 
 func (r *CampaignReconciler) currentRun(
@@ -671,6 +717,8 @@ func campaignIdentityFromNode(
 	reader client.Reader,
 	namespace string,
 	node *corev1.Node,
+	profile *signalv1.CertificationProfile,
+	suite *signalv1.CertificationSuite,
 	now time.Time,
 ) (*signalv1.CampaignRunIdentity, error) {
 	name := node.Annotations[CampaignRequestName]
@@ -698,7 +746,13 @@ func campaignIdentityFromNode(
 	if campaign.UID != uid ||
 		campaign.Spec.NodeName != node.Name ||
 		campaign.Spec.NodeUID != node.UID ||
-		campaign.Spec.Profile.Name != node.Labels[RequestLabel] {
+		campaign.Spec.Profile.Name != node.Labels[RequestLabel] ||
+		profile.Name != campaign.Spec.Profile.Name ||
+		profile.UID != campaign.Spec.Profile.UID ||
+		profile.Generation != campaign.Spec.Profile.Generation ||
+		suite.Name != campaign.Spec.Suite.Name ||
+		suite.UID != campaign.Spec.Suite.UID ||
+		suite.Generation != campaign.Spec.Suite.Generation {
 		return nil, errors.New("campaign request metadata does not match the live Campaign")
 	}
 

@@ -25,10 +25,11 @@ func TestCampaignEnrollmentCreatesReadyMatchingCampaign(t *testing.T) {
 	now := time.Date(2026, time.November, 17, 22, 0, 0, 0, time.UTC)
 	node := readyCampaignNode()
 	profile := campaignProfile()
+	suite := campaignSuite()
 	policy := campaignPolicy()
 	kube := fake.NewClientBuilder().
 		WithScheme(campaignTestScheme(t)).
-		WithObjects(node, profile, policy).
+		WithObjects(node, profile, suite, policy).
 		Build()
 
 	reconciler := &CampaignEnrollmentReconciler{
@@ -56,6 +57,7 @@ func TestCampaignEnrollmentCreatesReadyMatchingCampaign(t *testing.T) {
 	campaign := campaigns.Items[0]
 	if campaign.Spec.NodeUID != node.UID ||
 		campaign.Spec.Profile.UID != profile.UID ||
+		campaign.Spec.Suite.UID != suite.UID ||
 		campaign.Spec.Policy.UID != policy.UID {
 		t.Fatalf("campaign identity = %#v", campaign.Spec)
 	}
@@ -72,7 +74,7 @@ func TestCampaignEnrollmentSkipsUnreadyNode(t *testing.T) {
 	node.Status.Conditions[0].Status = corev1.ConditionFalse
 	kube := fake.NewClientBuilder().
 		WithScheme(campaignTestScheme(t)).
-		WithObjects(node, campaignProfile(), campaignPolicy()).
+		WithObjects(node, campaignProfile(), campaignSuite(), campaignPolicy()).
 		Build()
 
 	reconciler := &CampaignEnrollmentReconciler{
@@ -97,13 +99,37 @@ func TestCampaignEnrollmentSkipsUnreadyNode(t *testing.T) {
 	}
 }
 
+func TestCampaignEnrollmentKeepsExistingCampaignAfterProfileRemoval(t *testing.T) {
+	t.Parallel()
+
+	node := readyCampaignNode()
+	policy := campaignPolicy()
+	campaign := campaignExecution(time.Date(2026, time.November, 17, 22, 0, 0, 0, time.UTC))
+	campaign.Name = campaignName(policy.UID, node.UID)
+	kube := fake.NewClientBuilder().
+		WithScheme(campaignTestScheme(t)).
+		WithObjects(node, policy, campaign).
+		Build()
+	reconciler := &CampaignEnrollmentReconciler{
+		Client:    kube,
+		Namespace: campaign.Namespace,
+	}
+
+	if _, err := reconciler.Reconcile(
+		context.Background(),
+		ctrl.Request{NamespacedName: client.ObjectKey{Name: node.Name}},
+	); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+}
+
 func TestCampaignContinuesAfterFailedReleasedRun(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.November, 17, 22, 0, 0, 0, time.UTC)
 	node := readyCampaignNode()
 	campaign := campaignExecution(now)
-	kube := campaignFakeClient(t, node, campaign)
+	kube := campaignFakeClient(t, node, campaign, campaignProfile(), campaignSuite())
 	reconciler := &CampaignReconciler{
 		Client:    kube,
 		Namespace: campaign.Namespace,
@@ -225,7 +251,7 @@ func TestCampaignDeadlineStopsNewRuns(t *testing.T) {
 		CampaignRequestUID:      string(campaign.UID),
 		CampaignRequestSequence: "1",
 	}
-	kube := campaignFakeClient(t, node, campaign)
+	kube := campaignFakeClient(t, node, campaign, campaignProfile(), campaignSuite())
 	reconciler := &CampaignReconciler{
 		Client:    kube,
 		Namespace: campaign.Namespace,
@@ -262,6 +288,53 @@ func TestCampaignDeadlineStopsNewRuns(t *testing.T) {
 	}
 }
 
+func TestCampaignBlocksAndClearsRequestOnSuiteDrift(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.November, 17, 22, 0, 0, 0, time.UTC)
+	node := readyCampaignNode()
+	campaign := campaignExecution(now)
+	node.Labels[RequestLabel] = campaign.Spec.Profile.Name
+	node.Annotations = map[string]string{
+		CampaignRequestName:     campaign.Name,
+		CampaignRequestUID:      string(campaign.UID),
+		CampaignRequestSequence: "1",
+	}
+	suite := campaignSuite()
+	suite.Generation++
+	kube := campaignFakeClient(t, node, campaign, campaignProfile(), suite)
+	reconciler := &CampaignReconciler{
+		Client:    kube,
+		Namespace: campaign.Namespace,
+		Now:       func() time.Time { return now },
+	}
+
+	if _, err := reconciler.Reconcile(
+		context.Background(),
+		ctrl.Request{NamespacedName: client.ObjectKeyFromObject(campaign)},
+	); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var blocked signalv1.CertificationCampaign
+	if err := kube.Get(context.Background(), client.ObjectKeyFromObject(campaign), &blocked); err != nil {
+		t.Fatalf("get Campaign: %v", err)
+	}
+
+	if blocked.Status.Phase != signalv1.CampaignPhaseBlocked {
+		t.Fatalf("phase = %q, want Blocked", blocked.Status.Phase)
+	}
+
+	var cleared corev1.Node
+	if err := kube.Get(context.Background(), client.ObjectKeyFromObject(node), &cleared); err != nil {
+		t.Fatalf("get Node: %v", err)
+	}
+
+	if cleared.Labels[RequestLabel] != "" || cleared.Annotations[CampaignRequestUID] != "" {
+		t.Fatalf("drifted request was not cleared: labels %#v annotations %#v", cleared.Labels, cleared.Annotations)
+	}
+}
+
 func TestCampaignIdentityRejectsUnexpectedSequence(t *testing.T) {
 	t.Parallel()
 
@@ -282,9 +355,40 @@ func TestCampaignIdentityRejectsUnexpectedSequence(t *testing.T) {
 		kube,
 		campaign.Namespace,
 		node,
+		campaignProfile(),
+		campaignSuite(),
 		now,
 	); err == nil {
 		t.Fatal("campaignIdentityFromNode() accepted repeated sequence")
+	}
+}
+
+func TestCampaignIdentityRejectsProfileDrift(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.November, 17, 22, 0, 0, 0, time.UTC)
+	node := readyCampaignNode()
+	campaign := campaignExecution(now)
+	node.Labels[RequestLabel] = campaign.Spec.Profile.Name
+	node.Annotations = map[string]string{
+		CampaignRequestName:     campaign.Name,
+		CampaignRequestUID:      string(campaign.UID),
+		CampaignRequestSequence: "1",
+	}
+	kube := campaignFakeClient(t, node, campaign)
+	profile := campaignProfile()
+	profile.Generation++
+
+	if _, err := campaignIdentityFromNode(
+		context.Background(),
+		kube,
+		campaign.Namespace,
+		node,
+		profile,
+		campaignSuite(),
+		now,
+	); err == nil {
+		t.Fatal("campaignIdentityFromNode() accepted Profile generation drift")
 	}
 }
 
@@ -346,6 +450,19 @@ func campaignProfile() *signalv1.CertificationProfile {
 			UID:        types.UID("profile-uid"),
 			Generation: 3,
 		},
+		Spec: signalv1.CertificationProfileSpec{
+			Suite: signalv1.CertificationSuiteReference{Name: "complete-suite"},
+		},
+	}
+}
+
+func campaignSuite() *signalv1.CertificationSuite {
+	return &signalv1.CertificationSuite{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "complete-suite",
+			UID:        types.UID("suite-uid"),
+			Generation: 5,
+		},
 	}
 }
 
@@ -385,6 +502,11 @@ func campaignExecution(start time.Time) *signalv1.CertificationCampaign {
 				Name:       "complete-profile",
 				UID:        types.UID("profile-uid"),
 				Generation: 3,
+			},
+			Suite: signalv1.PinnedSuite{
+				Name:       "complete-suite",
+				UID:        types.UID("suite-uid"),
+				Generation: 5,
 			},
 			NodeName:  "participant",
 			NodeUID:   types.UID("node-uid"),

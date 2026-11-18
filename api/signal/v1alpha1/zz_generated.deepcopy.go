@@ -258,6 +258,7 @@ func (in *CertificationCampaignSpec) DeepCopyInto(out *CertificationCampaignSpec
 	*out = *in
 	out.Policy = in.Policy
 	out.Profile = in.Profile
+	out.Suite = in.Suite
 	in.StartedAt.DeepCopyInto(&out.StartedAt)
 	in.Deadline.DeepCopyInto(&out.Deadline)
 }
