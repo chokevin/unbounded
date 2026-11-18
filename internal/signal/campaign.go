@@ -48,6 +48,7 @@ type CampaignEnrollmentReconciler struct {
 
 func (r *CampaignEnrollmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		Named("campaign-enrollment").
 		For(&corev1.Node{}).
 		Watches(
 			&signalv1.CertificationCampaignPolicy{},
