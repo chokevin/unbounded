@@ -292,13 +292,13 @@ make signal-manifests \
   SIGNAL_GPU_INVENTORY_TEST_CONTENT_DIGEST=sha256:<reviewed-spec-digest>
 ```
 
-This renders the public `project-signal-gpu-baseline-v1` Suite. Private
-certification catalogs render their own Tests and Suite DAGs against the same
-API.
-Environment-specific Profiles are not rendered by the static package because
-their participant selectors, namespaces, storage, network, and resolver inputs
-must be reviewed at cutover. The separate execution-authority overlay renders
-only the reviewed baseline and vLLM Profiles that are explicitly enabled.
+This renders the public `project-signal-gpu-baseline-v1` Suite and its baseline
+Profile. Apply the acceptance catalog before rendering execution authority,
+record the live Profile UID, and pass that exact UID as
+`SIGNAL_BASELINE_PROFILE_UID`. When vLLM is enabled, the acceptance catalog
+also renders its reviewed Profile with the explicit model-cache binding; record
+and pass its live UID separately. Private certification catalogs render their
+own Tests, Suite DAGs, and Profiles against the same API.
 
 ## CertificationProfile contract
 
@@ -1013,9 +1013,9 @@ and release before any CRD or controller replacement:
    when new stored fields or Policy/ledger objects exist.
 5. Render with qualification protection disabled and verify the computed
    WorkflowTemplate digest is stable across two renders.
-6. Apply all six CRDs first, then controller and adapter RBAC, catalog sources,
+6. Apply all eight CRDs first, then controller and adapter RBAC, catalog sources,
    the adapter WorkflowTemplate, and finally the controller Deployment.
-7. Verify all six CRDs are Established, controller rollout is ready, the
+7. Verify all eight CRDs are Established, controller rollout is ready, the
    WorkflowTemplate adapter image matches `--adapter-image`, and the rendered
    WorkflowTemplate digest matches `--workflow-template-digest`. Record one
    commit-to-controller/adapter/runner/template digest mapping and verify the

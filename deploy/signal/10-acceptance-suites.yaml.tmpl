@@ -53,6 +53,24 @@ spec:
                 type: String
                 stringValue: consistent
 
+---
+apiVersion: signal.unbounded-cloud.io/v1alpha1
+kind: CertificationProfile
+metadata:
+  name: project-signal-gpu-baseline-8x-v1
+  labels:
+    app.kubernetes.io/part-of: project-signal
+spec:
+  participants:
+    count: 1
+    selector:
+      matchLabels:
+        nvidia.com/gpu.present: "true"
+        nvidia.com/gpu.count: "8"
+        nvidia.com/gpu.product: NVIDIA-B200
+  suite:
+    name: project-signal-gpu-baseline-v1
+
 {{- if eq (default "false" .VLLMCanaryEnabled) "true" }}
 {{- if empty .VLLMTestUID }}
 {{- fail "VLLMTestUID is required when vLLM acceptance Suite rendering is enabled" }}
@@ -208,5 +226,28 @@ spec:
               maximum:
                 type: Integer
                 integerValue: 8
+
+---
+apiVersion: signal.unbounded-cloud.io/v1alpha1
+kind: CertificationProfile
+metadata:
+  name: project-signal-vllm-canary-8x-v1
+  labels:
+    app.kubernetes.io/part-of: project-signal
+spec:
+  participants:
+    count: 1
+    selector:
+      matchLabels:
+        nvidia.com/gpu.present: "true"
+        nvidia.com/gpu.count: "8"
+        nvidia.com/gpu.product: NVIDIA-B200
+  suite:
+    name: project-signal-vllm-canary-v1
+  environment:
+    namespace: {{ default "project-signal" .Namespace }}
+    modelCaches:
+      - name: project-signal-vllm-model-cache
+        reference: {{ printf "pvc://%s/%s@%s" (default "project-signal" .Namespace) .VLLMModelCachePVC .VLLMModelCacheManifestDigest | quote }}
 {{- end }}
 {{- end }}

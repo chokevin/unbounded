@@ -863,8 +863,8 @@ func TestRenderedAcceptanceSuitesIncludeQualificationAndVLLM(t *testing.T) {
 	output := renderSignal(t, data)
 	documents := splitYAMLDocuments(string(readRenderedFile(t, output, "10-acceptance-suites.yaml")))
 
-	if len(documents) != 2 {
-		t.Fatalf("acceptance Suite documents = %d, want 2", len(documents))
+	if len(documents) != 4 {
+		t.Fatalf("acceptance Suite and Profile documents = %d, want 4", len(documents))
 	}
 
 	var baseline unstructured.Unstructured
@@ -886,7 +886,16 @@ func TestRenderedAcceptanceSuitesIncludeQualificationAndVLLM(t *testing.T) {
 		t.Fatal("baseline Suite must require a consistent driver version")
 	}
 
-	vllmText := documents[1]
+	assertContainsAll(
+		t,
+		documents[1],
+		"kind: CertificationProfile",
+		"name: project-signal-gpu-baseline-8x-v1",
+		"name: project-signal-gpu-baseline-v1",
+		"nvidia.com/gpu.count: \"8\"",
+	)
+
+	vllmText := documents[2]
 	for _, metric := range []string{
 		"serviceReady",
 		"modelIdentity",
@@ -905,6 +914,15 @@ func TestRenderedAcceptanceSuitesIncludeQualificationAndVLLM(t *testing.T) {
 			t.Fatalf("vLLM Suite does not assert %s", metric)
 		}
 	}
+
+	assertContainsAll(
+		t,
+		documents[3],
+		"kind: CertificationProfile",
+		"name: project-signal-vllm-canary-8x-v1",
+		"name: project-signal-vllm-canary-v1",
+		"pvc://signal-ns/approved-model-cache@"+data["VLLMModelCacheManifestDigest"],
+	)
 
 	for _, measurementOnly := range []string{
 		"endToEndLatency",
@@ -927,8 +945,8 @@ func TestRenderedExecutionAuthorityIsExplicitAndFailClosed(t *testing.T) {
 	output := renderSignal(t, data)
 
 	documents := splitYAMLDocuments(string(readRenderedFile(t, output, "11-execution-authority.yaml")))
-	if len(documents) != 8 {
-		t.Fatalf("execution authority documents = %d, want 8", len(documents))
+	if len(documents) != 6 {
+		t.Fatalf("execution authority documents = %d, want 6", len(documents))
 	}
 
 	text := strings.Join(documents, "\n---\n")
@@ -944,7 +962,6 @@ func TestRenderedExecutionAuthorityIsExplicitAndFailClosed(t *testing.T) {
 		"- project-signal-execution-state",
 		"uid: 11111111-1111-1111-1111-111111111111",
 		"uid: 33333333-3333-3333-3333-333333333333",
-		"pvc://signal-ns/approved-model-cache@"+data["VLLMModelCacheManifestDigest"],
 		"name: canonical-gpu-inventory",
 		"name: offline-vllm-canary",
 		"creditRule: PerParticipant",
@@ -983,8 +1000,8 @@ func TestRenderedBaselineOnlyAuthorityOmitsVLLM(t *testing.T) {
 	authority := string(readRenderedFile(t, output, "11-execution-authority.yaml"))
 
 	documents := splitYAMLDocuments(authority)
-	if len(documents) != 7 {
-		t.Fatalf("baseline-only authority documents = %d, want 7", len(documents))
+	if len(documents) != 6 {
+		t.Fatalf("baseline-only authority documents = %d, want 6", len(documents))
 	}
 
 	entries, err := os.ReadDir(output)
