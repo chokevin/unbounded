@@ -881,6 +881,10 @@ func TestRenderedAcceptanceSuitesIncludeQualificationAndVLLM(t *testing.T) {
 		t.Fatal("baseline Suite must contain exactly one canonical qualification Test")
 	}
 
+	if !strings.Contains(documents[0], "invocationTimeout: 15m") {
+		t.Fatal("baseline Suite must allow a cold certification runner image pull")
+	}
+
 	if !strings.Contains(documents[0], "metric: driverVersionSet") ||
 		!strings.Contains(documents[0], "stringValue: consistent") {
 		t.Fatal("baseline Suite must require a consistent driver version")

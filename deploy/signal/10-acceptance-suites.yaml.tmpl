@@ -29,7 +29,7 @@ spec:
             contentDigest: {{ .GPUInventoryTestContentDigest }}
           schedule:
             mode: RunOnce
-            invocationTimeout: 2m
+            invocationTimeout: 15m
           assertions:
             - name: nvidia-smi-available
               metric: nvidiaSmiAvailable
