@@ -1930,12 +1930,10 @@ func applyUnstructuredContainerIdentity(container map[string]any, allowRoot ...b
 		securityContext = map[string]any{}
 	}
 
-	if len(allowRoot) > 0 && allowRoot[0] && securityContext["runAsUser"] == int64(0) {
-		if securityContext["runAsGroup"] != int64(0) ||
-			securityContext["runAsNonRoot"] != false {
-			return errors.New("WorkflowTemplate root container must set runAsGroup 0 and runAsNonRoot false")
-		}
-
+	if len(allowRoot) > 0 && allowRoot[0] {
+		securityContext["runAsUser"] = int64(0)
+		securityContext["runAsGroup"] = int64(0)
+		securityContext["runAsNonRoot"] = false
 		container["securityContext"] = securityContext
 
 		return nil

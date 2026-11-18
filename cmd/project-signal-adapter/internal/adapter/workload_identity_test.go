@@ -147,6 +147,38 @@ func TestWorkflowTemplateRuntimeIdentityOverridesRootAndCoversMPIReplicas(t *tes
 	}
 }
 
+func TestWorkflowTemplateRuntimeIdentityAllowsApprovedRoot(t *testing.T) {
+	t.Parallel()
+
+	spec := map[string]any{
+		"templates": []any{map[string]any{
+			"name": "container",
+			"container": map[string]any{
+				"image": "example.invalid/workload@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"securityContext": map[string]any{
+					"privileged": true,
+				},
+			},
+		}},
+	}
+
+	err := applyWorkflowRuntimeIdentity(spec, workflowRuntimeIdentityOptions{AllowRoot: true})
+	if err != nil {
+		t.Fatalf("applyWorkflowRuntimeIdentity() error = %v", err)
+	}
+
+	templates := spec["templates"].([]any)
+	container := templates[0].(map[string]any)["container"].(map[string]any)
+	securityContext := container["securityContext"].(map[string]any)
+
+	if securityContext["runAsUser"] != int64(0) ||
+		securityContext["runAsGroup"] != int64(0) ||
+		securityContext["runAsNonRoot"] != false ||
+		securityContext["privileged"] != true {
+		t.Fatalf("WorkflowTemplate root container security context = %#v", securityContext)
+	}
+}
+
 func TestWorkflowTemplateRuntimeIdentityRejectsMalformedResource(t *testing.T) {
 	t.Parallel()
 
