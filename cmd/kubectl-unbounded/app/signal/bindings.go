@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	signalv1alpha1 "github.com/Azure/unbounded/api/signal/v1alpha1"
-	"github.com/Azure/unbounded/internal/signalplan"
+	"github.com/Azure/unbounded/cmd/kubectl-unbounded/internal/signalplan"
 )
 
 var certificationTestResource = schema.GroupVersionResource{

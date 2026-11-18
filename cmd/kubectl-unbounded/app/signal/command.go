@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
-	"github.com/Azure/unbounded/internal/signalplan"
+	"github.com/Azure/unbounded/cmd/kubectl-unbounded/internal/signalplan"
 )
 
 type renderOptions struct {
