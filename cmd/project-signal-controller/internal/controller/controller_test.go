@@ -2322,6 +2322,48 @@ func TestProfileWatchRequestsProfileNodes(t *testing.T) {
 	}
 }
 
+func TestAuthorityWatchRequestsPendingNodes(t *testing.T) {
+	t.Parallel()
+
+	requestingNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "requesting",
+			Labels: map[string]string{RequestLabel: "profile"},
+		},
+	}
+	idleNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "idle"}}
+	kube := fake.NewClientBuilder().WithObjects(requestingNode, idleNode).Build()
+	reconciler := &AdmissionReconciler{
+		Client:             kube,
+		AuthorityNamespace: "signal-authority",
+		AuthorityName:      "source-authority",
+	}
+
+	for _, name := range []string{"source-authority", ExecutionStateName} {
+		requests := reconciler.requestsForExecutionAuthority(
+			context.Background(),
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+				Namespace: "signal-authority",
+				Name:      name,
+			}},
+		)
+		if len(requests) != 1 || requests[0].Name != requestingNode.Name {
+			t.Fatalf("requests for %s = %#v", name, requests)
+		}
+	}
+
+	requests := reconciler.requestsForExecutionAuthority(
+		context.Background(),
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Namespace: "signal-authority",
+			Name:      "unrelated",
+		}},
+	)
+	if len(requests) != 0 {
+		t.Fatalf("requests for unrelated ConfigMap = %#v", requests)
+	}
+}
+
 func TestSuiteSnapshotAndRunPinning(t *testing.T) {
 	t.Parallel()
 

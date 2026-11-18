@@ -519,6 +519,10 @@ func (r *AdmissionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&signalv1.CertificationTest{},
 			handler.EnqueueRequestsFromMapFunc(r.requestsForTest),
 		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.requestsForExecutionAuthority),
+		).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }
@@ -553,6 +557,43 @@ func (r *AdmissionReconciler) requestsForProfile(
 	for index := range nodes.Items {
 		node := &nodes.Items[index]
 		if node.Labels[RequestLabel] == profile.Name {
+			requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKey{Name: node.Name}})
+		}
+	}
+
+	return requests
+}
+
+func (r *AdmissionReconciler) requestsForExecutionAuthority(
+	ctx context.Context,
+	object client.Object,
+) []ctrl.Request {
+	configMap, ok := object.(*corev1.ConfigMap)
+	if !ok || configMap.Namespace != r.AuthorityNamespace {
+		return nil
+	}
+
+	authorityName := r.AuthorityName
+	if authorityName == "" {
+		authorityName = ExecutionAuthorityName
+	}
+
+	if configMap.Name != authorityName && configMap.Name != ExecutionStateName {
+		return nil
+	}
+
+	var nodes corev1.NodeList
+	if err := r.List(ctx, &nodes); err != nil {
+		log.FromContext(ctx).Error(err, "failed to list Nodes after execution authority change")
+
+		return nil
+	}
+
+	requests := make([]ctrl.Request, 0)
+
+	for index := range nodes.Items {
+		node := &nodes.Items[index]
+		if node.Labels[RequestLabel] != "" {
 			requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKey{Name: node.Name}})
 		}
 	}
