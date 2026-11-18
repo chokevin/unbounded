@@ -742,6 +742,15 @@ func (r *AdmissionReconciler) admitNode(ctx context.Context, node *corev1.Node, 
 		r.now(),
 	)
 	if err != nil {
+		cleared, clearErr := r.clearOrphanedCampaignRequest(ctx, node, err)
+		if clearErr != nil {
+			return clearErr
+		}
+
+		if cleared {
+			return nil
+		}
+
 		return err
 	}
 
@@ -948,6 +957,34 @@ func (r *AdmissionReconciler) admitNode(ctx context.Context, node *corev1.Node, 
 	}
 
 	return nil
+}
+
+func (r *AdmissionReconciler) clearOrphanedCampaignRequest(
+	ctx context.Context,
+	node *corev1.Node,
+	identityErr error,
+) (bool, error) {
+	if !apierrors.IsNotFound(identityErr) || node.Annotations[ReservationLabel] != "" {
+		return false, nil
+	}
+
+	before := node.DeepCopy()
+	delete(node.Labels, RequestLabel)
+	delete(node.Annotations, CampaignRequestName)
+	delete(node.Annotations, CampaignRequestUID)
+	delete(node.Annotations, CampaignRequestSequence)
+
+	if err := r.Patch(ctx, node, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
+		return false, fmt.Errorf("clear orphaned campaign request: %w", err)
+	}
+
+	log.FromContext(ctx).Info(
+		"cleared orphaned campaign request",
+		"node", node.Name,
+		"campaign", before.Annotations[CampaignRequestName],
+	)
+
+	return true, nil
 }
 
 func (r *AdmissionReconciler) requireExecutionAuthority(ctx context.Context) error {

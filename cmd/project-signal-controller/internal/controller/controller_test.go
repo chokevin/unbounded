@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -189,6 +190,122 @@ func TestExecutionAuthorityFailsClosed(t *testing.T) {
 
 			if !tt.valid && runErr == nil {
 				t.Fatal("RunReconciler.requireExecutionAuthority() accepted unsafe authority")
+			}
+		})
+	}
+}
+
+func TestClearOrphanedCampaignRequest(t *testing.T) {
+	t.Parallel()
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "worker",
+			Labels: map[string]string{
+				RequestLabel: "profile",
+				"retained":   "label",
+			},
+			Annotations: map[string]string{
+				CampaignRequestName:     "deleted-campaign",
+				CampaignRequestUID:      "deleted-campaign-uid",
+				CampaignRequestSequence: "2",
+				"retained":              "annotation",
+			},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+	reconciler := &AdmissionReconciler{Client: kube}
+	identityErr := apierrors.NewNotFound(
+		schema.GroupResource{Group: signalv1.GroupVersion.Group, Resource: "certificationcampaigns"},
+		"deleted-campaign",
+	)
+
+	cleared, err := reconciler.clearOrphanedCampaignRequest(context.Background(), node, identityErr)
+	if err != nil {
+		t.Fatalf("clearOrphanedCampaignRequest() error = %v", err)
+	}
+
+	if !cleared {
+		t.Fatal("clearOrphanedCampaignRequest() did not handle missing Campaign")
+	}
+
+	var current corev1.Node
+	if err := kube.Get(context.Background(), client.ObjectKeyFromObject(node), &current); err != nil {
+		t.Fatalf("get cleared Node: %v", err)
+	}
+
+	if current.Labels[RequestLabel] != "" ||
+		current.Annotations[CampaignRequestName] != "" ||
+		current.Annotations[CampaignRequestUID] != "" ||
+		current.Annotations[CampaignRequestSequence] != "" {
+		t.Fatalf("orphaned campaign request was not cleared: labels %#v annotations %#v", current.Labels, current.Annotations)
+	}
+
+	if current.Labels["retained"] != "label" || current.Annotations["retained"] != "annotation" {
+		t.Fatalf("unrelated metadata was changed: labels %#v annotations %#v", current.Labels, current.Annotations)
+	}
+}
+
+func TestClearOrphanedCampaignRequestFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name        string
+		identityErr error
+		reservedBy  string
+	}{
+		{
+			name:        "identity mismatch",
+			identityErr: errors.New("campaign request metadata does not match the live Campaign"),
+		},
+		{
+			name:        "active reservation",
+			identityErr: apierrors.NewNotFound(schema.GroupResource{Resource: "certificationcampaigns"}, "deleted-campaign"),
+			reservedBy:  "active-run",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "worker",
+					Labels: map[string]string{RequestLabel: "profile"},
+					Annotations: map[string]string{
+						CampaignRequestName:     "campaign",
+						CampaignRequestUID:      "campaign-uid",
+						CampaignRequestSequence: "1",
+						ReservationLabel:        tt.reservedBy,
+					},
+				},
+			}
+			kube := fake.NewClientBuilder().WithObjects(node).Build()
+			reconciler := &AdmissionReconciler{Client: kube}
+
+			cleared, err := reconciler.clearOrphanedCampaignRequest(context.Background(), node, tt.identityErr)
+			if err != nil {
+				t.Fatalf("clearOrphanedCampaignRequest() error = %v", err)
+			}
+
+			if cleared {
+				t.Fatal("clearOrphanedCampaignRequest() cleared a request that must fail closed")
+			}
+
+			var current corev1.Node
+			if err := kube.Get(context.Background(), client.ObjectKeyFromObject(node), &current); err != nil {
+				t.Fatalf("get unchanged Node: %v", err)
+			}
+
+			if current.Labels[RequestLabel] != "profile" ||
+				current.Annotations[CampaignRequestName] != "campaign" ||
+				current.Annotations[CampaignRequestUID] != "campaign-uid" ||
+				current.Annotations[CampaignRequestSequence] != "1" {
+				t.Fatalf("campaign request changed: labels %#v annotations %#v", current.Labels, current.Annotations)
 			}
 		})
 	}
