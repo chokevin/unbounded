@@ -24,6 +24,7 @@ type CertificationMetricsCollector struct {
 	reader               client.Reader
 	completedMeasurement *prometheus.Desc
 	runFinishedTimestamp *prometheus.Desc
+	runParticipantInfo   *prometheus.Desc
 	r07MinimumAssertion  *prometheus.Desc
 	liveStageVerdict     *prometheus.Desc
 	nodeStatus           *prometheus.Desc
@@ -45,6 +46,21 @@ func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetric
 			"project_signal_fleet_certification_run_finished_timestamp_seconds",
 			"Unix timestamp when a retained CertificationRun finished.",
 			[]string{"namespace", "run", "run_uid", "profile", "suite", "phase"},
+			nil,
+		),
+		runParticipantInfo: prometheus.NewDesc(
+			"project_signal_fleet_certification_run_participant_info",
+			"Participant identity for a retained CertificationRun.",
+			[]string{
+				"namespace",
+				"run",
+				"run_uid",
+				"node",
+				"node_uid",
+				"profile",
+				"suite",
+				"campaign",
+			},
 			nil,
 		),
 		r07MinimumAssertion: prometheus.NewDesc(
@@ -102,6 +118,8 @@ func (c *CertificationMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 
 	ch <- c.runFinishedTimestamp
 
+	ch <- c.runParticipantInfo
+
 	ch <- c.r07MinimumAssertion
 
 	ch <- c.liveStageVerdict
@@ -135,6 +153,7 @@ func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		run := &runs.Items[runIndex]
 		c.collectRun(run, ch)
 		c.collectRunFinishedTimestamp(run, ch)
+		c.collectRunParticipants(run, ch)
 		c.collectLiveStageVerdicts(run, ch)
 
 		for participantIndex := range run.Spec.Participants {
@@ -169,6 +188,33 @@ func (c *CertificationMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for index := range campaigns.Items {
 		c.collectCampaign(&campaigns.Items[index], ch)
+	}
+}
+
+func (c *CertificationMetricsCollector) collectRunParticipants(
+	run *signalv1.CertificationRun,
+	ch chan<- prometheus.Metric,
+) {
+	campaign := ""
+	if run.Spec.Campaign != nil {
+		campaign = run.Spec.Campaign.Name
+	}
+
+	for index := range run.Spec.Participants {
+		participant := &run.Spec.Participants[index]
+		ch <- prometheus.MustNewConstMetric(
+			c.runParticipantInfo,
+			prometheus.GaugeValue,
+			1,
+			run.Namespace,
+			run.Name,
+			string(run.UID),
+			participant.NodeName,
+			string(participant.NodeUID),
+			run.Spec.Profile.Name,
+			run.Spec.Suite.Name,
+			campaign,
+		)
 	}
 }
 

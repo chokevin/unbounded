@@ -160,6 +160,54 @@ func TestCertificationMetricsCollectorPublishesRetainedRunCompletion(t *testing.
 	})
 }
 
+func TestCertificationMetricsCollectorPublishesRunParticipants(t *testing.T) {
+	t.Parallel()
+
+	run := certificationStatusRun(
+		"retained-run",
+		"2026-11-17T18:00:00Z",
+		signalv1.RunPhaseSucceeded,
+		[]signalv1.CheckPhase{signalv1.CheckPhaseSucceeded, signalv1.CheckPhaseSucceeded},
+	)
+	run.Spec.Campaign = &signalv1.CampaignRunIdentity{
+		Name:     "initial-validation",
+		UID:      "campaign-uid",
+		Sequence: 2,
+	}
+	run.Spec.Participants = append(run.Spec.Participants, signalv1.Participant{
+		NodeName: "participant-1",
+		NodeUID:  "node-uid-1",
+	})
+
+	families := gatherCertificationMetrics(t, run)
+
+	participants := families["project_signal_fleet_certification_run_participant_info"]
+	if participants == nil || len(participants.Metric) != 2 {
+		t.Fatalf("run participant metrics = %#v, want two", participants)
+	}
+
+	assertMetricLabels(t, participants.Metric[0], map[string]string{
+		"namespace": "project-signal",
+		"run":       "retained-run",
+		"run_uid":   "retained-run-uid",
+		"node":      "participant-0",
+		"node_uid":  "node-uid",
+		"profile":   "profile-v1",
+		"suite":     "suite-v1",
+		"campaign":  "initial-validation",
+	})
+	assertMetricLabels(t, participants.Metric[1], map[string]string{
+		"namespace": "project-signal",
+		"run":       "retained-run",
+		"run_uid":   "retained-run-uid",
+		"node":      "participant-1",
+		"node_uid":  "node-uid-1",
+		"profile":   "profile-v1",
+		"suite":     "suite-v1",
+		"campaign":  "initial-validation",
+	})
+}
+
 func TestCertificationMetricsCollectorPublishesCampaignHistory(t *testing.T) {
 	t.Parallel()
 

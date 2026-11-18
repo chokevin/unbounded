@@ -61,16 +61,27 @@ not otherwise require it.
 
 ### Grafana fleet dashboard
 
-Import `grafana/project-signal-node-certification.json` into a Grafana instance
-that can query the controller metrics endpoint. The dashboard uses
-`project_signal_node_certification_status` to render one compact row per
-participant from its newest Run:
+Import both dashboards into a Grafana instance that can query the controller
+metrics endpoint:
 
-- green: passed
-- yellow: actively certifying
-- red: failed, inconclusive, or canceled
+- `grafana/project-signal-fleet-overview.json` answers how the selected cluster
+  is doing now, summarizes recent certification activity, and identifies nodes
+  that need investigation.
+- `grafana/project-signal-node-certification.json` answers how one selected
+  node is doing now, how its active R01-R21 Run is progressing, and how its
+  repeated Runs performed during the 24-hour soak campaign.
 
-The instant fleet query is capped at 6,000 points and the table is paginated,
+Missing stage evidence is shown as not reached rather than zero. Exact Run
+phases remain distinct, so failed, inconclusive, canceled, pending, and active
+work are not collapsed into one dashboard state. Retained history is bounded
+by the configured Run retention policy. The node dashboard keeps active Run,
+soak campaign, and retained Run selectors separate because each represents a
+different level of certification evidence. Selecting a Node filters both active
+and retained Runs through
+`project_signal_fleet_certification_run_participant_info`; leave Retained Run
+on `All` to compare every retained Run for that node.
+
+The instant fleet query is capped at 5,000 points and the table is paginated,
 so one dashboard supports clusters with up to 5,000 participants. The metric
 also exposes the current stage name, one-based stage index, and total stage
 count. Grafana or the Prometheus ingestion layer should attach a stable

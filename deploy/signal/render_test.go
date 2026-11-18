@@ -1628,6 +1628,11 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	fleetContent, err := os.ReadFile("grafana/project-signal-fleet-overview.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var dashboard struct {
 		Refresh string `json:"refresh"`
 		UID     string `json:"uid"`
@@ -1643,14 +1648,25 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 		t.Fatalf("decode Grafana dashboard: %v", err)
 	}
 
-	if dashboard.UID != "project-signal-fleet-certification" ||
+	fleetDashboard := dashboard
+	if err := json.Unmarshal(fleetContent, &fleetDashboard); err != nil {
+		t.Fatalf("decode fleet Grafana dashboard: %v", err)
+	}
+
+	if dashboard.UID != "project-signal-node-certification" ||
 		dashboard.Refresh != "15s" ||
-		len(dashboard.Panels) != 17 {
-		t.Fatalf("dashboard identity = %#v", dashboard)
+		len(dashboard.Panels) != 22 {
+		t.Fatalf("node dashboard identity = %#v", dashboard)
+	}
+
+	if fleetDashboard.UID != "project-signal-fleet-certification" ||
+		fleetDashboard.Refresh != "15s" ||
+		len(fleetDashboard.Panels) != 7 {
+		t.Fatalf("fleet dashboard identity = %#v", fleetDashboard)
 	}
 
 	foundFleetMatrix := false
-	contentString := string(content)
+	contentString := string(content) + string(fleetContent)
 
 	for stage := 1; stage <= 21; stage++ {
 		if !strings.Contains(contentString, fmt.Sprintf("r%02d-", stage)) {
@@ -1659,26 +1675,38 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 	}
 
 	for _, title := range []string{
+		"Cluster health - all nodes",
+		"Current node outcomes",
+		"Running 24-hour campaigns",
+		"Cluster node attention queue",
+		"1. Selected node - current state",
+		"Selected node state",
+		"Current Run progress",
+		"2. Selected node - 24-hour soak",
+		"Soak campaign state",
+		"Soak time remaining",
+		"Soak Run outcomes",
+		"Soak Run pass rate",
 		"Foundation and inventory",
 		"Compute correctness",
 		"Fabric and collectives",
 		"Host and storage",
 		"Runtime, burn-in, telemetry",
 		"Inference serving",
-		"Inference performance",
-		"Certification history",
-		"Runs completed - past 24 hours",
-		"Rolling certification completions",
+		"Terminal Runs - past 24 hours",
+		"Retained Run evidence",
+		"Selected retained Run - immutable measurements",
+		"R07 BF16 minimum",
 	} {
 		if !strings.Contains(contentString, title) {
 			t.Fatalf("Grafana dashboard does not contain group %q", title)
 		}
 	}
 
-	for _, panel := range dashboard.Panels {
+	for _, panel := range append(dashboard.Panels, fleetDashboard.Panels...) {
 		for _, target := range panel.Targets {
 			if strings.Contains(target.Expression, "project_signal_node_certification_status") &&
-				panel.Title == "Node certification matrix" {
+				panel.Title == "Cluster node attention queue" {
 				foundFleetMatrix = true
 
 				if target.MaxDataPoints < 5000 {
@@ -1704,18 +1732,40 @@ func TestNodeCertificationGrafanaDashboard(t *testing.T) {
 	if strings.Count(
 		contentString,
 		"project_signal_fleet_certification_run_finished_timestamp_seconds",
-	) < 4 ||
+	) < 3 ||
 		!strings.Contains(contentString, "time() - 86400") {
 		t.Fatal("Grafana dashboard does not contain retained 24-hour certification history")
 	}
 
-	if !strings.Contains(contentString, `"name": "run"`) {
-		t.Fatal("Grafana dashboard does not contain the serving Run filter")
+	for _, metric := range []string{
+		"project_signal_certification_campaign_info",
+		"project_signal_certification_campaign_runs",
+		"project_signal_certification_campaign_deadline_timestamp_seconds",
+		"project_signal_fleet_certification_live_stage_verdict",
+		"project_signal_fleet_certification_run_participant_info",
+	} {
+		if !strings.Contains(contentString, metric) {
+			t.Fatalf("Grafana dashboard does not contain operational metric %q", metric)
+		}
 	}
 
-	if strings.Contains(contentString, "project_signal_fleet_certification_participant_info") ||
-		strings.Contains(contentString, "project_signal_fleet_certification_run_created_timestamp_seconds") {
+	for _, variable := range []string{`"name": "campaign"`, `"name": "node"`, `"name": "run"`} {
+		if !strings.Contains(contentString, variable) {
+			t.Fatalf("Grafana dashboard does not contain filter %s", variable)
+		}
+	}
+
+	if strings.Contains(contentString, "project_signal_fleet_certification_run_created_timestamp_seconds") {
 		t.Fatal("Grafana dashboard joins verdicts through unavailable compatibility metrics")
+	}
+
+	if strings.Contains(contentString, "label_replace(vector(0)") {
+		t.Fatal("Grafana dashboard must not render missing stage evidence as a zero")
+	}
+
+	if strings.Contains(contentString, `metric_id=\"outputTokensPerSecond\"} > 0`) ||
+		strings.Contains(contentString, `metric_id=\"timeToFirstToken\"} > 0`) {
+		t.Fatal("Grafana dashboard must not hide valid zero-valued inference measurements")
 	}
 }
 
