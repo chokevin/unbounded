@@ -117,6 +117,12 @@ spec:
                 required:
                 - name
                 type: object
+              stopOnFailure:
+                description: |-
+                  StopOnFailure ends the campaign after a failed Run finishes and releases.
+                  The default is false, so campaigns continue admitting Runs until stopped
+                  or their deadline is reached.
+                type: boolean
               trigger:
                 enum:
                 - OnNodeReady

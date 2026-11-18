@@ -65,6 +65,10 @@ func TestCampaignEnrollmentCreatesReadyMatchingCampaign(t *testing.T) {
 	if got, want := campaign.Spec.Deadline.Time, now.Add(24*time.Hour); !got.Equal(want) {
 		t.Fatalf("deadline = %s, want %s", got, want)
 	}
+
+	if campaign.Spec.StopOnFailure {
+		t.Fatal("StopOnFailure = true, want default false")
+	}
 }
 
 func TestCampaignEnrollmentSkipsUnreadyNode(t *testing.T) {
@@ -96,6 +100,38 @@ func TestCampaignEnrollmentSkipsUnreadyNode(t *testing.T) {
 
 	if len(campaigns.Items) != 0 {
 		t.Fatalf("campaigns = %d, want 0", len(campaigns.Items))
+	}
+}
+
+func TestCampaignEnrollmentPinsStopOnFailure(t *testing.T) {
+	t.Parallel()
+
+	node := readyCampaignNode()
+	policy := campaignPolicy()
+	policy.Spec.StopOnFailure = true
+	kube := fake.NewClientBuilder().
+		WithScheme(campaignTestScheme(t)).
+		WithObjects(node, campaignProfile(), campaignSuite(), policy).
+		Build()
+	reconciler := &CampaignEnrollmentReconciler{
+		Client:    kube,
+		Namespace: "project-signal",
+	}
+
+	if _, err := reconciler.Reconcile(
+		context.Background(),
+		ctrl.Request{NamespacedName: client.ObjectKey{Name: node.Name}},
+	); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var campaigns signalv1.CertificationCampaignList
+	if err := kube.List(context.Background(), &campaigns); err != nil {
+		t.Fatalf("list campaigns: %v", err)
+	}
+
+	if len(campaigns.Items) != 1 || !campaigns.Items[0].Spec.StopOnFailure {
+		t.Fatalf("campaigns = %#v, want one fail-fast campaign", campaigns.Items)
 	}
 }
 
@@ -285,6 +321,57 @@ func TestCampaignDeadlineStopsNewRuns(t *testing.T) {
 
 	if unchanged.Annotations[CampaignRequestUID] != "" {
 		t.Fatalf("deadline campaign retained request annotations: %#v", unchanged.Annotations)
+	}
+}
+
+func TestCampaignStopsAfterFailedReleasedRunWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.November, 17, 22, 0, 0, 0, time.UTC)
+	node := readyCampaignNode()
+	campaign := campaignExecution(now)
+	campaign.Spec.StopOnFailure = true
+	run := campaignRun(campaign, signalv1.RunPhaseFailed)
+	run.Status.Conditions = []metav1.Condition{{
+		Type:   signalv1.RunConditionReleased,
+		Status: metav1.ConditionTrue,
+		Reason: "Released",
+	}}
+	kube := campaignFakeClient(t, node, campaign, campaignProfile(), campaignSuite(), run)
+	reconciler := &CampaignReconciler{
+		Client:    kube,
+		Namespace: campaign.Namespace,
+		Now:       func() time.Time { return now },
+	}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(campaign)}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("record failed Run: %v", err)
+	}
+
+	var completed signalv1.CertificationCampaign
+	if err := kube.Get(context.Background(), client.ObjectKeyFromObject(campaign), &completed); err != nil {
+		t.Fatalf("get Campaign: %v", err)
+	}
+
+	if completed.Status.Phase != signalv1.CampaignPhaseCompleted ||
+		completed.Status.FailedRuns != 1 ||
+		completed.Status.LastRun == nil ||
+		completed.Status.CurrentRun != nil {
+		t.Fatalf("completed campaign status = %#v", completed.Status)
+	}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("reconcile completed Campaign: %v", err)
+	}
+
+	var unchanged corev1.Node
+	if err := kube.Get(context.Background(), client.ObjectKeyFromObject(node), &unchanged); err != nil {
+		t.Fatalf("get Node: %v", err)
+	}
+
+	if unchanged.Labels[RequestLabel] != "" {
+		t.Fatalf("completed campaign requested another Run with label %q", unchanged.Labels[RequestLabel])
 	}
 }
 

@@ -571,6 +571,9 @@ spec:
       signal.unbounded-cloud.io/initial-validation: "true"
   trigger: OnNodeReady
   duration: 24h
+  # Optional. The default is false, so failed Runs are retained and the
+  # campaign continues until its deadline.
+  stopOnFailure: false
 ```
 
 The selector is evaluated whenever a Node or Policy changes. Therefore, a
@@ -578,6 +581,12 @@ matching Node that is already Ready is enrolled when the Policy is introduced;
 a newly joined matching Node is enrolled on its first observed Ready state.
 The deterministic Campaign identity prevents controller restarts from creating
 another campaign for the same Policy UID and Node UID.
+
+Set `stopOnFailure: true` when a campaign should stop admitting new Runs after
+the first failed Run finishes and releases. Inconclusive or canceled Runs still
+continue; operators can use `spec.stop: true` on the Campaign to stop after any
+other outcome. Existing Campaigns pin this choice, so changing the Policy only
+affects newly enrolled Nodes.
 
 Inspect campaign progress and retained Runs:
 

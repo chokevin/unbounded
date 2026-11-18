@@ -117,6 +117,10 @@ spec:
                   Stop prevents new Runs from being admitted. An active Run is allowed to
                   finish and release normally.
                 type: boolean
+              stopOnFailure:
+                description: StopOnFailure ends the campaign after a failed Run finishes
+                  and releases.
+                type: boolean
               suite:
                 properties:
                   generation:
@@ -164,6 +168,9 @@ spec:
               rule: self.startedAt == oldSelf.startedAt
             - message: deadline is immutable
               rule: self.deadline == oldSelf.deadline
+            - message: stopOnFailure is immutable
+              rule: (has(self.stopOnFailure) && self.stopOnFailure) == (has(oldSelf.stopOnFailure)
+                && oldSelf.stopOnFailure)
             - message: stop cannot be cleared
               rule: '!has(oldSelf.stop) || !oldSelf.stop || (has(self.stop) && self.stop)'
           status:

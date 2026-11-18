@@ -163,10 +163,11 @@ func (r *CampaignEnrollmentReconciler) ensureCampaign(
 				UID:        suite.UID,
 				Generation: suite.Generation,
 			},
-			NodeName:  node.Name,
-			NodeUID:   node.UID,
-			StartedAt: metav1.NewTime(now),
-			Deadline:  metav1.NewTime(now.Add(policy.Spec.Duration.Duration)),
+			NodeName:      node.Name,
+			NodeUID:       node.UID,
+			StartedAt:     metav1.NewTime(now),
+			Deadline:      metav1.NewTime(now.Add(policy.Spec.Duration.Duration)),
+			StopOnFailure: policy.Spec.StopOnFailure,
 		},
 	}
 
@@ -320,6 +321,10 @@ func (r *CampaignReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if !campaign.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+
+	if campaign.Status.Phase == signalv1.CampaignPhaseCompleted {
 		return ctrl.Result{}, nil
 	}
 
@@ -535,6 +540,22 @@ func (r *CampaignReconciler) reconcileRun(
 		campaign.Status.InconclusiveRuns++
 	case signalv1.RunPhaseCancelled:
 		campaign.Status.CanceledRuns++
+	}
+
+	if run.Status.Phase == signalv1.RunPhaseFailed && campaign.Spec.StopOnFailure {
+		campaign.Status.Phase = signalv1.CampaignPhaseCompleted
+		setCampaignCondition(
+			campaign,
+			metav1.ConditionTrue,
+			"RunFailed",
+			"The campaign stopped after a failed Run",
+		)
+
+		if err := r.Status().Patch(ctx, campaign, client.MergeFrom(before)); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{}, nil
 	}
 
 	setCampaignCondition(campaign, metav1.ConditionFalse, "RunComplete", "The latest campaign Run completed and released")

@@ -1068,6 +1068,12 @@ func TestCertificationCampaignContract(t *testing.T) {
 	}
 
 	policySpec := policy.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+
+	stopOnFailure := policySpec.Properties["stopOnFailure"]
+	if stopOnFailure.Type != "boolean" {
+		t.Fatalf("CampaignPolicy stopOnFailure type = %q, want boolean", stopOnFailure.Type)
+	}
+
 	if !hasValidationRule(&policySpec, "duration(self.duration) > duration('0s')") {
 		t.Fatal("CampaignPolicy does not require a positive duration")
 	}
@@ -1095,6 +1101,13 @@ func TestCertificationCampaignContract(t *testing.T) {
 
 	if !hasValidationRule(&spec, "self.suite == oldSelf.suite") {
 		t.Fatal("Campaign Suite identity is not immutable")
+	}
+
+	if !hasValidationRule(
+		&spec,
+		"(has(self.stopOnFailure) && self.stopOnFailure) == (has(oldSelf.stopOnFailure) && oldSelf.stopOnFailure)",
+	) {
+		t.Fatal("Campaign failure behavior is not immutable")
 	}
 }
 

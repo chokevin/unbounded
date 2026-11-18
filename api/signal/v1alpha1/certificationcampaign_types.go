@@ -23,6 +23,10 @@ type CertificationCampaignPolicySpec struct {
 	NodeSelector metav1.LabelSelector   `json:"nodeSelector"`
 	Trigger      CampaignTrigger        `json:"trigger"`
 	Duration     metav1.Duration        `json:"duration"`
+	// StopOnFailure ends the campaign after a failed Run finishes and releases.
+	// The default is false, so campaigns continue admitting Runs until stopped
+	// or their deadline is reached.
+	StopOnFailure bool `json:"stopOnFailure,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -74,6 +78,7 @@ type CampaignRunReference struct {
 // +kubebuilder:validation:XValidation:rule="self.nodeUID == oldSelf.nodeUID",message="nodeUID is immutable"
 // +kubebuilder:validation:XValidation:rule="self.startedAt == oldSelf.startedAt",message="startedAt is immutable"
 // +kubebuilder:validation:XValidation:rule="self.deadline == oldSelf.deadline",message="deadline is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.stopOnFailure) && self.stopOnFailure) == (has(oldSelf.stopOnFailure) && oldSelf.stopOnFailure)",message="stopOnFailure is immutable"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.stop) || !oldSelf.stop || (has(self.stop) && self.stop)",message="stop cannot be cleared"
 type CertificationCampaignSpec struct {
 	Policy    PinnedCampaignPolicy `json:"policy"`
@@ -83,6 +88,8 @@ type CertificationCampaignSpec struct {
 	NodeUID   types.UID            `json:"nodeUID"`
 	StartedAt metav1.Time          `json:"startedAt"`
 	Deadline  metav1.Time          `json:"deadline"`
+	// StopOnFailure ends the campaign after a failed Run finishes and releases.
+	StopOnFailure bool `json:"stopOnFailure,omitempty"`
 	// Stop prevents new Runs from being admitted. An active Run is allowed to
 	// finish and release normally.
 	Stop bool `json:"stop,omitempty"`
