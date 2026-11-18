@@ -867,6 +867,12 @@ external ingress. Restarting its Pod discards the local time series;
 certification evidence remains durable in immutable evidence ConfigMaps
 independently of Prometheus.
 
+For the repeatable internal handoff from each certification cluster to a
+central metrics backend and Grafana, follow the
+[certification cluster observability SOP](observability-sop.md). Environment
+endpoints, credentials, dashboard JSON, and cluster assignments belong in the
+internal deployment layer rather than this repository.
+
 After each stage completes, the controller validates the immutable stage result
 and publishes its bounded typed measurement projection in Run status while the
 parent Workflow continues. It exports numeric completed measurements as
