@@ -59,34 +59,6 @@ Suite's bound WorkflowTemplates create `MPIJob` resources, including the
 private R03 and R05 certification stages; the public native stage model does
 not otherwise require it.
 
-### Grafana fleet dashboard
-
-Import both dashboards into a Grafana instance that can query the controller
-metrics endpoint:
-
-- `grafana/project-signal-fleet-overview.json` answers how the selected cluster
-  is doing now, summarizes recent certification activity, and identifies nodes
-  that need investigation.
-- `grafana/project-signal-node-certification.json` answers how one selected
-  node is doing now, how its active R01-R21 Run is progressing, and how its
-  repeated Runs performed during the 24-hour soak campaign.
-
-Missing stage evidence is shown as not reached rather than zero. Exact Run
-phases remain distinct, so failed, inconclusive, canceled, pending, and active
-work are not collapsed into one dashboard state. Retained history is bounded
-by the configured Run retention policy. The node dashboard keeps active Run,
-soak campaign, and retained Run selectors separate because each represents a
-different level of certification evidence. Selecting a Node filters both active
-and retained Runs through
-`project_signal_fleet_certification_run_participant_info`; leave Retained Run
-on `All` to compare every retained Run for that node.
-
-The instant fleet query is capped at 5,000 points and the table is paginated,
-so one dashboard supports clusters with up to 5,000 participants. The metric
-also exposes the current stage name, one-based stage index, and total stage
-count. Grafana or the Prometheus ingestion layer should attach a stable
-`cluster` label when a data source aggregates multiple clusters.
-
 ## First deployment
 
 Render the manifests with immutable controller, adapter, and certification
@@ -899,9 +871,7 @@ After each stage completes, the controller validates the immutable stage result
 and publishes its bounded typed measurement projection in Run status while the
 parent Workflow continues. It exports numeric completed measurements as
 `project_signal_fleet_certification_measurement`; compatibility projections such
-as the completed R07 minimum derive from the same state. The fleet Grafana
-dashboard uses this projection for run-selectable R19/R20 AIPerf output token
-throughput and time-to-first-token panels. Script metrics may
+as the completed R07 minimum derive from the same state. Script metrics may
 declare a bounded telemetry contract with a live
 gauge mode, allowed dimensions, series and sample limits, and an optional final
 evidence aggregation. Workloads append generic JSON measurement records; the
