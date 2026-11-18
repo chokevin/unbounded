@@ -889,10 +889,18 @@ func TestRenderedAcceptanceSuitesIncludeQualificationAndVLLM(t *testing.T) {
 	assertContainsAll(
 		t,
 		documents[1],
+		"baseline Profile",
 		"kind: CertificationProfile",
 		"name: project-signal-gpu-baseline-8x-v1",
 		"name: project-signal-gpu-baseline-v1",
-		"nvidia.com/gpu.count: \"8\"",
+		"nvidia.com/gpu.present: \"true\"",
+	)
+	assertContainsNone(
+		t,
+		documents[1],
+		"baseline Profile",
+		"nvidia.com/gpu.count",
+		"nvidia.com/gpu.product",
 	)
 
 	vllmText := documents[2]
@@ -918,10 +926,19 @@ func TestRenderedAcceptanceSuitesIncludeQualificationAndVLLM(t *testing.T) {
 	assertContainsAll(
 		t,
 		documents[3],
+		"vLLM Profile",
 		"kind: CertificationProfile",
 		"name: project-signal-vllm-canary-8x-v1",
 		"name: project-signal-vllm-canary-v1",
+		"nvidia.com/gpu.present: \"true\"",
 		"pvc://signal-ns/approved-model-cache@"+data["VLLMModelCacheManifestDigest"],
+	)
+	assertContainsNone(
+		t,
+		documents[3],
+		"vLLM Profile",
+		"nvidia.com/gpu.count",
+		"nvidia.com/gpu.product",
 	)
 
 	for _, measurementOnly := range []string{
@@ -2104,6 +2121,16 @@ func assertContainsAll(t *testing.T, content, name string, values ...string) {
 	for _, value := range values {
 		if !strings.Contains(content, value) {
 			t.Fatalf("%s does not contain %q", name, value)
+		}
+	}
+}
+
+func assertContainsNone(t *testing.T, content, name string, values ...string) {
+	t.Helper()
+
+	for _, value := range values {
+		if strings.Contains(content, value) {
+			t.Fatalf("%s contains %q", name, value)
 		}
 	}
 }

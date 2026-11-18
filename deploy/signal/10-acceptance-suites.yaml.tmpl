@@ -66,8 +66,6 @@ spec:
     selector:
       matchLabels:
         nvidia.com/gpu.present: "true"
-        nvidia.com/gpu.count: "8"
-        nvidia.com/gpu.product: NVIDIA-B200
   suite:
     name: project-signal-gpu-baseline-v1
 
@@ -240,8 +238,6 @@ spec:
     selector:
       matchLabels:
         nvidia.com/gpu.present: "true"
-        nvidia.com/gpu.count: "8"
-        nvidia.com/gpu.product: NVIDIA-B200
   suite:
     name: project-signal-vllm-canary-v1
   environment:
