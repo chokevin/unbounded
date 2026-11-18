@@ -30,6 +30,8 @@ spec:
         - key: node.kubernetes.io/unschedulable
           operator: Exists
           effect: NoSchedule
+      nodeSelector:
+        kubernetes.io/arch: amd64
       securityContext:
         seccompProfile:
           type: RuntimeDefault

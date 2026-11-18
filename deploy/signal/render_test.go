@@ -65,8 +65,9 @@ func TestRenderedExecutionProvenanceIsPinnedAndDeterministic(t *testing.T) {
 	var workflow struct {
 		Spec struct {
 			Templates []struct {
-				Name      string `json:"name"`
-				Container struct {
+				Name         string            `json:"name"`
+				NodeSelector map[string]string `json:"nodeSelector"`
+				Container    struct {
 					Image string   `json:"image"`
 					Args  []string `json:"args"`
 				} `json:"container"`
@@ -81,6 +82,10 @@ func TestRenderedExecutionProvenanceIsPinnedAndDeterministic(t *testing.T) {
 		workflow.Spec.Templates[0].Name != "certification" ||
 		workflow.Spec.Templates[0].Container.Image != testAdapterImage {
 		t.Fatalf("WorkflowTemplate adapter identity = %#v", workflow.Spec.Templates)
+	}
+
+	if workflow.Spec.Templates[0].NodeSelector["kubernetes.io/arch"] != "amd64" {
+		t.Fatalf("WorkflowTemplate adapter node selector = %#v, want amd64", workflow.Spec.Templates[0].NodeSelector)
 	}
 
 	adapterArgs := workflow.Spec.Templates[0].Container.Args
@@ -109,6 +114,13 @@ func TestRenderedExecutionProvenanceIsPinnedAndDeterministic(t *testing.T) {
 	controller := deployment.Spec.Template.Spec.Containers[0]
 	if controller.Image != testControllerImage {
 		t.Fatalf("controller image = %q, want %q", controller.Image, testControllerImage)
+	}
+
+	if deployment.Spec.Template.Spec.NodeSelector["kubernetes.io/arch"] != "amd64" {
+		t.Fatalf(
+			"controller node selector = %#v, want amd64",
+			deployment.Spec.Template.Spec.NodeSelector,
+		)
 	}
 
 	for _, argument := range []string{
