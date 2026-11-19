@@ -4232,8 +4232,19 @@ func initialRunStatuses(run *signalv1.CertificationRun) []signalv1.CheckStatus {
 	}
 
 	statuses := make([]signalv1.CheckStatus, resolvedStageCount(*run.Spec.ResolvedPlan))
-	for index := range statuses {
-		statuses[index].Phase = signalv1.CheckPhasePending
+	statusIndex := 0
+
+	for phaseIndex := range run.Spec.ResolvedPlan.Phases {
+		phase := &run.Spec.ResolvedPlan.Phases[phaseIndex]
+		for stageIndex := range phase.Stages {
+			statuses[statusIndex] = signalv1.CheckStatus{
+				PlanPhase:  phase.Name,
+				Stage:      phase.Stages[stageIndex].Name,
+				StageIndex: int32(statusIndex + 1),
+				Phase:      signalv1.CheckPhasePending,
+			}
+			statusIndex++
+		}
 	}
 
 	return statuses
@@ -4506,11 +4517,14 @@ func compactCheckStatuses(statuses []signalv1.CheckStatus) []signalv1.CheckStatu
 	compacted := make([]signalv1.CheckStatus, len(statuses))
 	for index := range statuses {
 		compacted[index] = signalv1.CheckStatus{
-			ID:      statuses[index].ID,
-			Order:   statuses[index].Order,
-			Phase:   statuses[index].Phase,
-			Verdict: statuses[index].Verdict,
-			Reason:  boundedStatusText(statuses[index].Reason),
+			ID:         statuses[index].ID,
+			Order:      statuses[index].Order,
+			PlanPhase:  statuses[index].PlanPhase,
+			Stage:      statuses[index].Stage,
+			StageIndex: statuses[index].StageIndex,
+			Phase:      statuses[index].Phase,
+			Verdict:    statuses[index].Verdict,
+			Reason:     boundedStatusText(statuses[index].Reason),
 		}
 	}
 

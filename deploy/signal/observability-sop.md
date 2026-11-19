@@ -1,72 +1,148 @@
-# Project Signal certification cluster observability SOP
+# Project Signal observability integration
 
-## Purpose
+## Purpose and ownership boundary
 
-Use this SOP for every internal certification cluster so Project Signal metrics
-reach the same central metrics backend and Grafana dashboards without changing
-the upstream Signal runtime.
+Project Signal exposes Prometheus metrics and includes a namespace-local
+Prometheus deployment for immediate troubleshooting. Production monitoring
+requires an external observability system.
 
-The standard has two ownership layers:
+This open source document defines the portable integration contract:
 
-- The upstream Signal deployment emits metrics and deploys the
-  namespace-local `project-signal-prometheus` scraper.
-- The internal deployment layer owns central metrics transport, credentials,
-  cluster aliases, Grafana data sources, dashboards, and alerts.
+- metric endpoints and discovery annotations;
+- supported ADX-Mon and Prometheus remote-write integration patterns;
+- stable cluster and node-provider label semantics;
+- GPU exporter requirements; and
+- backend-independent validation and failure handling.
 
-Do not commit internal endpoints, credentials, cluster names, node names, or
-dashboard JSON to this repository.
+An organization-specific deployment document must define:
 
-## Required inputs
+- the subscription, resource group, and resource instances to use;
+- the exact ADX-Mon, metrics backend, and Grafana endpoints;
+- managed identities, tenants, role assignments, and Secret references;
+- the cluster-to-dashboard and cluster-to-data-source assignments;
+- immutable dashboard artifact revisions; and
+- environment-specific rollout and rollback commands.
 
-Record these values in the internal deployment system before deployment:
+Do not add those organization-specific values to this repository. The public
+integration contract should remain usable with any conforming deployment.
+
+## Metric label contract
+
+Central telemetry must add these bounded labels:
+
+| Label | Value |
+|---|---|
+| `cluster` | The actual Kubernetes cluster identifier selected by the deployer |
+| `provider` | The node's canonical `unbounded-cloud.io/site` label |
+| `environment` | An optional bounded value such as `test` or `preproduction` |
+| `signal_source_commit` | The full Project Signal source commit SHA |
+
+`provider` is node-specific. Do not configure it as one global external label.
+Do not use the pod Downward API to read `unbounded-cloud.io/site`; pod metadata
+does not expose node labels. Enrich telemetry through Kubernetes node discovery
+or a collector node-metadata watcher.
+
+Node names and provider values are valid operational labels because node-level
+certification and GPU telemetry require them. Redact those values from public
+evidence. Never use credentials, endpoints, subscription or account
+identifiers, or unbounded user-supplied values as metric labels.
+
+## Upstream deployment
+
+Render and apply the Signal package using immutable controller, adapter,
+runner, resolver, and Prometheus image digests. Verify that it includes:
+
+- `Service/project-signal-controller-metrics`;
+- `ConfigMap/project-signal-prometheus-config`;
+- `Deployment/project-signal-prometheus`; and
+- `Service/project-signal-prometheus`.
+
+The controller and live telemetry Pods expose both standard Prometheus and
+ADX-Mon discovery annotations. The namespace-local Prometheus service has no
+external ingress and stores only 24 hours or 1 GiB in ephemeral storage. It is
+for local troubleshooting, not durable cross-cluster monitoring.
+
+## ADX-Mon integration
+
+Install ADX-Mon by following the
+[ADX-Mon quick start](https://azure.github.io/adx-mon/quick-start/) or the
+reviewed deployment process for your environment. The ADX-Mon collector
+discovers the controller and live telemetry Pods through their
+`adx-mon/scrape`, `adx-mon/port`, and `adx-mon/path` annotations.
+
+Configure bounded cluster identity and Kubernetes node metadata in the
+collector. The exact resource names and endpoints belong in the internal
+deployment document.
+
+```toml
+[add-labels]
+  cluster = '<cluster-name>'
+  environment = '<environment>'
+  signal_source_commit = '<full-commit-sha>'
+
+[metadata-watch.kubernetes-node]
+
+[add-metadata-labels]
+  [add-metadata-labels.kubernetes-node]
+    [add-metadata-labels.kubernetes-node.labels]
+      'unbounded-cloud.io/site' = 'provider'
+```
+
+See the
+[ADX-Mon collector configuration](https://azure.github.io/adx-mon/config/)
+for current syntax, filtering, WAL, authentication, and scrape settings.
+
+GPU telemetry requires a DCGM exporter or another exporter that supplies the
+dashboard's required GPU metric families. Annotate exporter Pods for ADX-Mon
+discovery:
+
+```yaml
+metadata:
+  annotations:
+    adx-mon/scrape: "true"
+    adx-mon/port: "9400"
+    adx-mon/path: /metrics
+```
+
+Alternatively, configure a reviewed static scrape target in ADX-Mon. Pin the
+exporter image by digest, apply the minimum required privileges, tolerate the
+certification node taints, and verify one healthy target per GPU node.
+
+## Prometheus remote-write integration
+
+Deployments that use a Prometheus-compatible central backend may extend the
+namespace-local scraper or deploy a separate collector. The extension must:
+
+- preserve the upstream controller and live-workload scrape jobs;
+- add the standard labels from this document;
+- derive `provider` from Kubernetes node discovery;
+- load credentials from Secret references or workload identity;
+- use bounded queue and retry settings; and
+- expose sent, failed, retried, pending, and dropped sample metrics.
+
+Backend URLs, identity IDs, tenant IDs, and role assignments belong only in the
+internal deployment document.
+
+## Internal deployment record
+
+Before deploying, record these values in the organization-owned deployment
+system:
 
 | Input | Requirement |
 |---|---|
 | Signal source revision | Full commit SHA |
 | Controller and adapter images | Immutable digest references |
-| Certification cluster alias | Stable, non-sensitive identifier |
-| Environment | Bounded value such as `test` or `preproduction` |
-| Central metrics endpoint | Internal configuration only |
-| Metrics credentials | Secret reference, never a literal in manifests |
+| Cluster identity | Exact value assigned to the `cluster` label |
+| Node provider source | `unbounded-cloud.io/site` |
+| Central metrics resources | Exact subscription and resource assignments |
+| Metrics authentication | Identity and Secret references, never literal credentials |
+| Grafana resources | Exact instance, data source, folder, and dashboard UID |
 | Dashboard revision | Immutable internal artifact revision |
+| Rollback revision | Last known-good transport and dashboard revisions |
 
-Use the same bounded external labels on every cluster:
-
-```yaml
-certification_cluster: <non-sensitive-alias>
-environment: <environment>
-signal_source_commit: <full-commit-sha>
-```
-
-Do not use node names, infrastructure provider names, subscription or account
-identifiers, or unbounded user-supplied values as metric labels.
-
-## Deployment procedure
-
-1. Render and apply the upstream Signal package using immutable controller,
-   adapter, runner, resolver, and Prometheus image digests.
-2. Verify the base package includes:
-   - `Service/project-signal-controller-metrics`;
-   - `ConfigMap/project-signal-prometheus-config`;
-   - `Deployment/project-signal-prometheus`; and
-   - `Service/project-signal-prometheus`.
-3. Apply the internal metrics transport overlay. It must:
-   - preserve the upstream scrape jobs;
-   - send metrics to the approved central metrics backend;
-   - load credentials from a namespace-scoped Secret;
-   - add only the standard external labels above;
-   - use bounded retry and queue settings; and
-   - fail visibly instead of silently dropping samples.
-4. Provision or update the internal Grafana data source against the central
-   metrics backend.
-5. Provision the approved internal Project Signal dashboard revision.
-6. Record the Signal source revision, image digests, dashboard revision, and
-   cluster alias in the internal deployment ledger.
-
-The namespace-local Prometheus service is not the cross-cluster integration
-boundary. It has no external ingress and stores only 24 hours or 1 GiB in
-ephemeral storage. Central transport is required for durable multi-cluster
-dashboards and comparisons.
+The internal document should contain the exact commands needed to configure
+the approved resources. It must not redefine the public metric or label
+contract.
 
 ## Validation procedure
 
@@ -102,7 +178,7 @@ kubectl --context "$CTX" -n "$NS" run signal-metrics-check \
 The result must contain one healthy controller target. Then verify these metric
 families are queryable locally and centrally:
 
-- `project_signal_node_certification_status`
+- `project_signal_fleet_node_certification_status`
 - `project_signal_fleet_certification_live_stage_verdict`
 - `project_signal_fleet_certification_measurement`
 - `project_signal_certification_campaign_info`
@@ -127,10 +203,11 @@ Run one short certification smoke and confirm:
 2. the current stage changes while the workload is active;
 3. live workload metrics appear when declared by the Test;
 4. terminal status and completed measurements appear after completion; and
-5. the internal Grafana dashboard shows the same cluster alias and Run state.
+5. the internal Grafana dashboard shows the same cluster identity and Run
+   state.
 
 Save detailed command output in the internal validation record. PR-facing
-evidence must use the non-sensitive cluster alias and redact node names.
+evidence must redact cluster, node, and provider values.
 
 ## Acceptance gate
 
@@ -139,12 +216,13 @@ A certification cluster is observability-ready only when all of these are true:
 - Signal controller and local Prometheus rollouts are healthy.
 - Local controller scrape health is `1`.
 - Central transport has no failed or dropped samples.
-- Central queries return the cluster alias and Signal source commit.
+- Central queries return the configured cluster identity and Signal source
+  commit.
 - The approved dashboard revision renders node, Run, stage, campaign, and
   measurement data.
 - A smoke Run is visible from admission through terminal release.
-- No credential, internal endpoint, node name, or infrastructure provider name
-  appears in public artifacts.
+- No credential, internal endpoint, cluster identity, node name, or provider
+  value appears in public artifacts.
 
 Do not start a long certification or soak campaign before this gate passes.
 
@@ -154,7 +232,9 @@ Do not start a long certification or soak campaign before this gate passes.
 |---|---|---|
 | Controller target is down locally | Service selector, Pod readiness, port 8080 | Fix the upstream deployment before checking Grafana |
 | Local metrics work but central metrics are absent | Transport authentication, queue, TLS, and endpoint | Fix the internal overlay; do not alter Signal metric code |
-| Central metrics exist but the dashboard is empty | Data source, dashboard revision, cluster alias variables | Fix the internal Grafana layer |
+| Central metrics exist but the dashboard is empty | Data source, dashboard revision, cluster and provider variables | Fix the internal Grafana layer |
+| Provider is empty | Node metadata watcher and canonical site label | Derive it from `unbounded-cloud.io/site`; do not use pod Downward API |
+| Dashboard joins return duplicates | Empty or stale provider series | Exclude empty provider values and use a non-empty All matcher |
 | Live metrics disappear after a stage | Whether the workload exited | Expected for ephemeral live series; use completed measurements and evidence |
 | Historical metrics disappear locally | Prometheus Pod restart or retention limit | Use the central backend; local storage is intentionally ephemeral |
 | Label cardinality grows unexpectedly | External labels and Test dimensions | Stop rollout and remove unbounded or sensitive labels |

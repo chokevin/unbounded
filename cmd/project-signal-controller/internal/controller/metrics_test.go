@@ -282,7 +282,7 @@ func TestCertificationMetricsCollectorPublishesLatestNodeStatusAndStage(t *testi
 
 	families := gatherCertificationMetrics(t, oldRun, newRun)
 
-	status := families["project_signal_node_certification_status"]
+	status := families["project_signal_fleet_node_certification_status"]
 	if status == nil || len(status.Metric) != 1 {
 		t.Fatalf("node status metrics = %#v, want one latest metric", status)
 	}
@@ -324,7 +324,7 @@ func TestCertificationMetricsCollectorPublishesTerminalNodeStatus(t *testing.T) 
 
 	families := gatherCertificationMetrics(t, succeeded, failed)
 
-	status := families["project_signal_node_certification_status"]
+	status := families["project_signal_fleet_node_certification_status"]
 	if status == nil || len(status.Metric) != 2 {
 		t.Fatalf("node status metrics = %#v, want two metrics", status)
 	}
@@ -358,7 +358,7 @@ func TestCertificationMetricsCollectorPublishesCanceledResolvedStage(t *testing.
 
 	families := gatherCertificationMetrics(t, run)
 
-	status := families["project_signal_node_certification_status"]
+	status := families["project_signal_fleet_node_certification_status"]
 	if status == nil || len(status.Metric) != 1 {
 		t.Fatalf("node status metrics = %#v, want one metric", status)
 	}
@@ -412,7 +412,7 @@ func TestCertificationMetricsCollectorUsesParticipantSpecificStage(t *testing.T)
 
 	families := gatherCertificationMetrics(t, run)
 
-	status := families["project_signal_node_certification_status"]
+	status := families["project_signal_fleet_node_certification_status"]
 	if status == nil || len(status.Metric) != 2 {
 		t.Fatalf("node status metrics = %#v, want two metrics", status)
 	}
@@ -449,7 +449,7 @@ func TestCertificationMetricsCollectorPublishes5000NodeFleet(t *testing.T) {
 
 	families := gatherCertificationMetrics(t, runs...)
 
-	status := families["project_signal_node_certification_status"]
+	status := families["project_signal_fleet_node_certification_status"]
 	if status == nil || len(status.Metric) != fleetSize {
 		t.Fatalf("node status metric count = %d, want %d", len(status.GetMetric()), fleetSize)
 	}

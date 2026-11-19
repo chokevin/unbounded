@@ -2043,9 +2043,26 @@ spec:
                       - Inconclusive
                       - Skipped
                       type: string
+                    planPhase:
+                      description: PlanPhase and Stage identify a resolved-plan stage.
+                        Legacy check Runs omit them.
+                      maxLength: 63
+                      minLength: 1
+                      type: string
                     reason:
                       maxLength: 1024
                       type: string
+                    stage:
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                    stageIndex:
+                      description: StageIndex is the one-based position in the flattened
+                        resolved plan.
+                      format: int32
+                      maximum: 32
+                      minimum: 1
+                      type: integer
                     verdict:
                       description: |-
                         Verdict is populated as soon as completed stage evidence is validated.

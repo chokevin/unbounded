@@ -1680,7 +1680,7 @@ func TestRunningRunStatusesTracksResolvedStages(t *testing.T) {
 		"phase":       "Running",
 	}
 
-	statuses := runningRunStatuses(workflow, run)
+	statuses := compactCheckStatuses(runningRunStatuses(workflow, run))
 
 	want := []signalv1.CheckPhase{
 		signalv1.CheckPhaseSucceeded,
@@ -1694,6 +1694,23 @@ func TestRunningRunStatusesTracksResolvedStages(t *testing.T) {
 	for index := range want {
 		if statuses[index].Phase != want[index] {
 			t.Fatalf("status %d phase = %q, want %q", index, statuses[index].Phase, want[index])
+		}
+	}
+
+	wantIdentity := []struct {
+		planPhase string
+		stage     string
+		index     int32
+	}{
+		{planPhase: "startup", stage: "prepare", index: 1},
+		{planPhase: "startup", stage: "optional-observer", index: 2},
+		{planPhase: "validation", stage: "validate", index: 3},
+	}
+	for index := range wantIdentity {
+		if statuses[index].PlanPhase != wantIdentity[index].planPhase ||
+			statuses[index].Stage != wantIdentity[index].stage ||
+			statuses[index].StageIndex != wantIdentity[index].index {
+			t.Fatalf("status %d identity = %#v, want %#v", index, statuses[index], wantIdentity[index])
 		}
 	}
 }

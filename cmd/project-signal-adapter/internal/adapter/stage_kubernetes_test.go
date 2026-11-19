@@ -1499,6 +1499,8 @@ func TestStagePodStreamsDeclaredMetricsWithoutWorkloadCredentials(t *testing.T) 
 		pod.Spec.Containers[1].Image != invocation.AdapterImage ||
 		pod.Spec.Containers[1].Command[0] != "/project-signal-adapter" ||
 		pod.Spec.Containers[1].Args[0] != "metric-proxy" ||
+		pod.Annotations["adx-mon/scrape"] != "true" ||
+		pod.Annotations["adx-mon/port"] != strconv.Itoa(liveTelemetryPort) ||
 		pod.Annotations["prometheus.io/scrape"] != "true" ||
 		pod.Annotations["prometheus.io/port"] != strconv.Itoa(liveTelemetryPort) {
 		t.Fatalf("live telemetry Pod = %#v", pod)

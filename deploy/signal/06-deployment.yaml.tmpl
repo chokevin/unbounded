@@ -58,6 +58,10 @@ spec:
       app.kubernetes.io/name: project-signal-controller
   template:
     metadata:
+      annotations:
+        adx-mon/path: /metrics
+        adx-mon/port: metrics
+        adx-mon/scrape: "true"
       labels:
         app.kubernetes.io/name: project-signal-controller
         app.kubernetes.io/part-of: project-signal

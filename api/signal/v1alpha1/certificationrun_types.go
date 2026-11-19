@@ -405,10 +405,21 @@ type CheckCleanupStatus struct {
 
 type CheckStatus struct {
 	// Internal fields are derived or transient and are never persisted in CR status.
-	ID               CheckID    `json:"-"`
-	Order            int32      `json:"-"`
-	WorkflowNodeName string     `json:"-"`
-	Phase            CheckPhase `json:"phase"`
+	ID               CheckID `json:"-"`
+	Order            int32   `json:"-"`
+	WorkflowNodeName string  `json:"-"`
+	// PlanPhase and Stage identify a resolved-plan stage. Legacy check Runs omit them.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	PlanPhase string `json:"planPhase,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Stage string `json:"stage,omitempty"`
+	// StageIndex is the one-based position in the flattened resolved plan.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=32
+	StageIndex int32      `json:"stageIndex,omitempty"`
+	Phase      CheckPhase `json:"phase"`
 	// Verdict is populated as soon as completed stage evidence is validated.
 	// Resolved-plan Runs use StageVerdict values. Legacy Runs retain their
 	// historical Pass, Fail, and Inconclusive values.

@@ -76,7 +76,7 @@ func NewCertificationMetricsCollector(reader client.Reader) *CertificationMetric
 			nil,
 		),
 		nodeStatus: prometheus.NewDesc(
-			"project_signal_node_certification_status",
+			"project_signal_fleet_node_certification_status",
 			"Current certification state and stage from the newest Run for each participant.",
 			[]string{
 				"namespace",

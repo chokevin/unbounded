@@ -123,6 +123,12 @@ func TestRenderedExecutionProvenanceIsPinnedAndDeterministic(t *testing.T) {
 		)
 	}
 
+	if deployment.Spec.Template.Annotations["adx-mon/scrape"] != "true" ||
+		deployment.Spec.Template.Annotations["adx-mon/port"] != "metrics" ||
+		deployment.Spec.Template.Annotations["adx-mon/path"] != "/metrics" {
+		t.Fatalf("controller ADX-Mon annotations = %#v", deployment.Spec.Template.Annotations)
+	}
+
 	for _, argument := range []string{
 		"--script-namespace=script-ns",
 		"--runner-image=" + testRunnerImage,

@@ -546,6 +546,9 @@ func (e *KubernetesStageExecutor) stagePod(
 	}
 	if liveTelemetry {
 		pod.Annotations = map[string]string{
+			"adx-mon/path":         "/metrics",
+			"adx-mon/port":         strconv.Itoa(liveTelemetryPort),
+			"adx-mon/scrape":       "true",
 			"prometheus.io/path":   "/metrics",
 			"prometheus.io/port":   strconv.Itoa(liveTelemetryPort),
 			"prometheus.io/scrape": "true",
