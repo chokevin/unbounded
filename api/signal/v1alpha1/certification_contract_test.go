@@ -823,6 +823,24 @@ func TestCertificationRunPlanAndEvidenceContract(t *testing.T) {
 		t.Fatal("Run resolvedPlan has no phases")
 	}
 
+	checkStatus := root.Properties["status"].Properties["checks"].Items.Schema
+	for _, property := range []string{"planPhase", "stage", "stageIndex", "phase"} {
+		if _, found := checkStatus.Properties[property]; !found {
+			t.Fatalf("Run check status has no %s", property)
+		}
+	}
+
+	if checkStatus.Properties["stageIndex"].Minimum == nil ||
+		*checkStatus.Properties["stageIndex"].Minimum != 1 ||
+		checkStatus.Properties["stageIndex"].Maximum == nil ||
+		*checkStatus.Properties["stageIndex"].Maximum != 32 {
+		t.Fatalf(
+			"Run check status stageIndex bounds = %v..%v, want 1..32",
+			checkStatus.Properties["stageIndex"].Minimum,
+			checkStatus.Properties["stageIndex"].Maximum,
+		)
+	}
+
 	resolvedStage := resolvedPlan.Properties["phases"].Items.Schema.
 		Properties["stages"].Items.Schema
 	for _, rule := range []string{
@@ -1090,6 +1108,29 @@ func TestCertificationCampaignContract(t *testing.T) {
 	campaignVersion := campaign.Spec.Versions[0]
 	if campaignVersion.Subresources == nil || campaignVersion.Subresources.Status == nil {
 		t.Fatal("Campaign status subresource is not enabled")
+	}
+
+	var deadlineColumn *apiextensionsv1.CustomResourceColumnDefinition
+
+	for index := range campaignVersion.AdditionalPrinterColumns {
+		column := &campaignVersion.AdditionalPrinterColumns[index]
+		if column.Name == "Deadline" {
+			deadlineColumn = column
+
+			break
+		}
+	}
+
+	if deadlineColumn == nil {
+		t.Fatal("Campaign has no Deadline printer column")
+	}
+
+	if deadlineColumn.Type != "string" || deadlineColumn.JSONPath != ".spec.deadline" {
+		t.Fatalf(
+			"Campaign Deadline printer column = type %q path %q, want string .spec.deadline",
+			deadlineColumn.Type,
+			deadlineColumn.JSONPath,
+		)
 	}
 
 	campaignSchema := campaignVersion.Schema.OpenAPIV3Schema

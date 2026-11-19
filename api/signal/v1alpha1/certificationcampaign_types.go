@@ -118,7 +118,7 @@ type CertificationCampaignStatus struct {
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profile.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Runs",type=integer,JSONPath=`.status.startedRuns`
-// +kubebuilder:printcolumn:name="Deadline",type=date,JSONPath=`.spec.deadline`
+// +kubebuilder:printcolumn:name="Deadline",type=string,JSONPath=`.spec.deadline`
 type CertificationCampaign struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
