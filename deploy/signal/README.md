@@ -145,11 +145,13 @@ and does not depend on a pre-created script ConfigMap.
 Use the
 `hack/agent/skills/project-signal-provider-certification/` skill for the
 clean-cluster workflow. It discovers every Node matching the provider selector,
-requires each selected Node to be Ready, schedulable, and expose eight GPUs,
-installs the pinned Argo and Signal runtimes, records trust for the exact
-rendered Test digest, installs the central metrics overlay, requires healthy
-remote-write, runs a two-minute smoke, and then launches one 24-hour burn per
-Node.
+requires each selected Node to be backed by exactly one Machine reporting
+`status.isolation: none`, and requires the Node to be Ready, schedulable, and
+expose eight GPUs. Host-native isolation is mandatory because qualification
+includes kernel Xid telemetry. The skill installs the pinned Argo and Signal
+runtimes, records trust for the exact rendered Test digest, installs the
+central metrics overlay, requires healthy remote-write, runs a two-minute
+smoke, and then launches one 24-hour burn per Node.
 
 The public repository owns the controllers, burn contract, DCGM exporter,
 Prometheus base, label semantics, and validation gates. The organization-owned

@@ -7,6 +7,8 @@ spec:
   cluster: replace-with-actual-cluster-identifier
   environment: certification
   sourceCommit: replace-with-controller-image-source-commit
+  # Every selected Node must be backed by a Machine whose status.isolation is
+  # "none". Host-native kernel telemetry is part of the qualification contract.
   nodeSelector:
     unbounded-cloud.io/site: replace-with-provider-identifier
   providerLabel: unbounded-cloud.io/site
