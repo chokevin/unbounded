@@ -467,6 +467,79 @@ func TestWholeNodeBurnUsesNVMLXidEvents(t *testing.T) {
 	}
 }
 
+func TestWholeNodeBurnOutputsDoNotOverlapSharedVolume(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := os.ReadFile(filepath.Join(
+		"certification/whole-node-24h/workflow-template.yaml",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	objects := decodeCertificationBundle(t, manifest)
+	if len(objects) != 1 {
+		t.Fatalf("got %d workflow objects, want 1", len(objects))
+	}
+
+	templates, found, err := unstructured.NestedSlice(objects[0].Object, "spec", "templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("workflow templates are missing")
+	}
+
+	wantPaths := map[string]string{
+		"verdict":       "/tmp/project-signal-output/verdict",
+		"reason":        "/tmp/project-signal-output/reason",
+		"exit-code":     "/tmp/project-signal-output/gpu-burn-exit-code",
+		"qualification": "/tmp/project-signal-output/qualification.json",
+	}
+	checked := 0
+
+	for _, templateValue := range templates {
+		template, ok := templateValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _, _ := unstructured.NestedString(template, "name")
+		if name != "burn" {
+			continue
+		}
+		parameters, found, err := unstructured.NestedSlice(template, "outputs", "parameters")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			t.Fatal("burn output parameters are missing")
+		}
+		for _, parameterValue := range parameters {
+			parameter, ok := parameterValue.(map[string]any)
+			if !ok {
+				t.Fatal("burn output parameter has an invalid shape")
+			}
+			parameterName, _, _ := unstructured.NestedString(parameter, "name")
+			wantPath, ok := wantPaths[parameterName]
+			if !ok {
+				continue
+			}
+			path, _, _ := unstructured.NestedString(parameter, "valueFrom", "path")
+			if path != wantPath {
+				t.Fatalf("output %q path = %q, want %q", parameterName, path, wantPath)
+			}
+			if strings.HasPrefix(path, "/results/") {
+				t.Fatalf("output %q overlaps the shared results volume", parameterName)
+			}
+			checked++
+		}
+	}
+
+	if checked != len(wantPaths) {
+		t.Fatalf("checked %d burn outputs, want %d", checked, len(wantPaths))
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 

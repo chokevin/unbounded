@@ -59,7 +59,14 @@ spec:
 
           status=$?
 
-          printf '%s' "$status" > /results/gpu-burn-exit-code
+          output_dir=/tmp/project-signal-output
+          mkdir -p "$output_dir"
+          cp /results/verdict "$output_dir/verdict"
+          cp /results/reason "$output_dir/reason"
+          if [[ -f /results/qualification.json ]]; then
+            cp /results/qualification.json "$output_dir/qualification.json"
+          fi
+          printf '%s' "$status" > "$output_dir/gpu-burn-exit-code"
 
           exit 0
         command:
@@ -283,19 +290,19 @@ spec:
       - name: verdict
         valueFrom:
           default: Inconclusive
-          path: /results/verdict
+          path: /tmp/project-signal-output/verdict
       - name: reason
         valueFrom:
           default: MissingTestResult
-          path: /results/reason
+          path: /tmp/project-signal-output/reason
       - name: exit-code
         valueFrom:
           default: '2'
-          path: /results/gpu-burn-exit-code
+          path: /tmp/project-signal-output/gpu-burn-exit-code
       - name: qualification
         valueFrom:
           default: '{}'
-          path: /results/qualification.json
+          path: /tmp/project-signal-output/qualification.json
     tolerations:
     - effect: NoSchedule
       key: node.kubernetes.io/unschedulable
