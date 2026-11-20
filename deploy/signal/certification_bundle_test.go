@@ -270,6 +270,37 @@ func TestProviderCertificationAuthorityUsesImageSourceCommit(t *testing.T) {
 	}
 }
 
+func TestProviderCertificationResetsOnlyEmptyExpiredSmokeCampaigns(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(script)
+	if !strings.Contains(source, `.status.phase == "Completed"`) {
+		t.Fatal("smoke retry does not require the prior campaign to be completed")
+	}
+	for _, field := range []string{
+		".status.succeededRuns",
+		".status.failedRuns",
+		".status.inconclusiveRuns",
+		".status.canceledRuns",
+	} {
+		if !strings.Contains(source, field) {
+			t.Fatalf("smoke retry does not guard %s", field)
+		}
+	}
+	if !strings.Contains(source, "reset empty smoke campaigns whose admission window expired") {
+		t.Fatal("empty expired smoke campaign reset is missing")
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 

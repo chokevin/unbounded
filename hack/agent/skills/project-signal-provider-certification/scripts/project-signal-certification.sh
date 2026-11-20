@@ -770,7 +770,7 @@ apply_profile_and_policy() {
   local mode="$2"
   local profile="${WORK_DIR}/profile.yaml"
   local policy="${WORK_DIR}/campaign-policy-${mode}.yaml"
-  local profile_uid policy_name
+  local campaigns empty_campaigns profile_uid policy_name
 
   jq -n \
     --arg name "${profile_name}" \
@@ -797,6 +797,34 @@ apply_profile_and_policy() {
     -o jsonpath='{.metadata.uid}')"
 
   policy_name="project-signal-${INSTALLATION}-${mode}"
+  if [[ "${mode}" == "smoke" ]] &&
+    kube get certificationcampaignpolicy "${policy_name}" >/dev/null 2>&1; then
+    campaigns="$(kube -n "${namespace}" get certificationcampaigns -o json)"
+    empty_campaigns="$(
+      jq -r --arg policy "${policy_name}" '
+        [.items[] | select(.spec.policy.name == $policy)] as $campaigns |
+        if ($campaigns | length) > 0 and
+          all($campaigns[];
+            .status.phase == "Completed" and
+            ((.status.succeededRuns // 0) +
+             (.status.failedRuns // 0) +
+             (.status.inconclusiveRuns // 0) +
+             (.status.canceledRuns // 0)) == 0
+          )
+        then $campaigns[].metadata.name
+        else empty
+        end
+      ' <<<"${campaigns}"
+    )"
+    if [[ -n "${empty_campaigns}" ]]; then
+      while IFS= read -r campaign; do
+        kube -n "${namespace}" delete certificationcampaign "${campaign}" --wait=true
+      done <<<"${empty_campaigns}"
+      kube delete certificationcampaignpolicy "${policy_name}" --wait=true
+      printf 'reset empty smoke campaigns whose admission window expired\n'
+    fi
+  fi
+
   jq -n \
     --arg name "${policy_name}" \
     --arg profile "${profile_name}" \
