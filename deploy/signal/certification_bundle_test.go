@@ -644,7 +644,10 @@ func TestProviderCertificationUninstallStopsCampaignsBeforeRuns(t *testing.T) {
 	}
 
 	uninstall := source[uninstallStart : uninstallStart+uninstallEnd]
-	deleteCampaigns := strings.Index(uninstall, "delete certificationcampaigns --all")
+	deleteCampaigns := strings.Index(
+		uninstall,
+		`delete_all_signal_resources certificationcampaigns "${namespace}"`,
+	)
 	cancelRuns := strings.Index(uninstall, "cancel_and_release_runs")
 	if deleteCampaigns == -1 || cancelRuns == -1 {
 		t.Fatal("uninstall campaign or Run cleanup step not found")
@@ -663,6 +666,90 @@ func TestProviderCertificationUninstallStopsCampaignsBeforeRuns(t *testing.T) {
 
 	if uninstallArgo > deleteMetrics || uninstallArgo > deleteRuntime {
 		t.Fatal("uninstall deletes Helm release metadata before uninstalling Argo")
+	}
+}
+
+func TestProviderCertificationDeleteAllSignalResourcesSkipsMissingCRDs(t *testing.T) {
+	t.Parallel()
+
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "kubectl.log")
+	writeExecutable(t, filepath.Join(binDir, "kubectl"), `#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${MOCK_KUBECTL_LOG}"
+	if [[ "$*" == *"get customresourcedefinition"* ]]; then
+	  if [[ "${MOCK_DISCOVERY_FAILURE:-false}" == "true" ]]; then
+	    printf 'discovery failed\n' >&2
+	    exit 42
+	  fi
+	  if [[ "${MOCK_RESOURCE_REGISTERED:-false}" == "true" ]]; then
+	    printf 'customresourcedefinition.apiextensions.k8s.io/certificationcampaignpolicies.signal.unbounded-cloud.io\n'
+	  fi
+fi
+`)
+
+	script := filepath.Join(
+		repoRoot,
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	)
+	runDelete := func(registered, discoveryFailure bool) (string, string, error) {
+		t.Helper()
+
+		if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		command := exec.Command(
+			"bash",
+			"-c",
+			`source "$1"; CONTEXT=test-context; REMOTE_HOST=""; delete_all_signal_resources certificationcampaignpolicies`,
+			"bash",
+			script,
+		)
+		command.Dir = repoRoot
+		command.Env = append(
+			os.Environ(),
+			"PROJECT_SIGNAL_LIB_ONLY=true",
+			"PATH="+binDir+":"+os.Getenv("PATH"),
+			"MOCK_KUBECTL_LOG="+logPath,
+			fmt.Sprintf("MOCK_RESOURCE_REGISTERED=%t", registered),
+			fmt.Sprintf("MOCK_DISCOVERY_FAILURE=%t", discoveryFailure),
+		)
+
+		output, err := command.CombinedOutput()
+		log, readErr := os.ReadFile(logPath)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+
+		return string(log), string(output), err
+	}
+
+	log, output, err := runDelete(false, false)
+	if err != nil {
+		t.Fatalf("missing Signal CRD: %v\n%s", err, output)
+	}
+	if strings.Contains(log, " delete ") {
+		t.Fatalf("missing Signal CRD still triggered a delete:\n%s", log)
+	}
+
+	log, output, err = runDelete(true, false)
+	if err != nil {
+		t.Fatalf("registered Signal CRD: %v\n%s", err, output)
+	}
+	if !strings.Contains(
+		log,
+		"delete certificationcampaignpolicies --all --ignore-not-found",
+	) {
+		t.Fatalf("registered Signal CRD was not deleted:\n%s", log)
+	}
+
+	if _, output, err = runDelete(false, true); err == nil {
+		t.Fatalf("CRD discovery failure was silently treated as an absent resource:\n%s", output)
 	}
 }
 

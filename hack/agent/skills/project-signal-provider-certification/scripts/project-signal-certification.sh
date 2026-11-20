@@ -156,6 +156,27 @@ kube_delete_directory() {
   done
 }
 
+delete_all_signal_resources() {
+  local resource="$1"
+  local target_namespace="${2:-}"
+  local crd
+  local -a namespace_args=()
+
+  if [[ -n "${target_namespace}" ]]; then
+    namespace_args=(-n "${target_namespace}")
+  fi
+
+  crd="$(
+    kube get customresourcedefinition \
+      "${resource}.signal.unbounded-cloud.io" \
+      --ignore-not-found \
+      -o name
+  )"
+  if [[ -n "${crd}" ]]; then
+    kube "${namespace_args[@]}" delete "${resource}" --all --ignore-not-found
+  fi
+}
+
 load_config() {
   local config_path="$1"
 
@@ -1164,24 +1185,15 @@ uninstall_all() {
   render_signal_phase base
   render_metrics_overlay
 
-  kube delete certificationcampaignpolicies --all --ignore-not-found
-  kube -n "${namespace}" delete certificationcampaigns --all \
-    --ignore-not-found
+  delete_all_signal_resources certificationcampaignpolicies
+  delete_all_signal_resources certificationcampaigns "${namespace}"
   cancel_and_release_runs
-  kube delete \
-    certificationprofiles,certificationsuites,certificationtests,certificationpolicies \
-    --all --ignore-not-found
-
-  for manifest in \
-    "${WORK_DIR}/campaign-policy-smoke.yaml" \
-    "${WORK_DIR}/campaign-policy-full.yaml" \
-    "${WORK_DIR}/profile.yaml" \
-    "${WORK_DIR}/certification-package-smoke.yaml" \
-    "${WORK_DIR}/certification-package-full.yaml" \
-    "${WORK_DIR}/certification-package.yaml" \
-    "${WORK_DIR}/certification-tests.yaml"; do
-    [[ -f "${manifest}" ]] &&
-      kube_delete_file "${manifest}"
+  for resource in \
+    certificationprofiles \
+    certificationsuites \
+    certificationtests \
+    certificationpolicies; do
+    delete_all_signal_resources "${resource}"
   done
 
   if [[ -n "${REMOTE_HOST:-}" ]]; then
