@@ -111,6 +111,15 @@ case "$*" in
 ]}
 EOF
     ;;
+  *" get pods -A -o json")
+    if [[ "${MOCK_ACTIVE_GPU_WORKLOAD:-false}" == "true" ]]; then
+      cat <<'EOF'
+{"items":[{"metadata":{"namespace":"serving","name":"busy"},"spec":{"nodeName":"provider-node-a","containers":[{"resources":{"requests":{"nvidia.com/gpu":"8"}}}]},"status":{"phase":"Running"}}]}
+EOF
+    else
+      printf '{"items":[]}\n'
+    fi
+    ;;
   kustomize*)
     cat <<'EOF'
 apiVersion: v1
@@ -189,6 +198,21 @@ spec:
 	}
 	if !strings.Contains(string(output), "did not match any provider Nodes") {
 		t.Fatalf("empty-selector failure is unclear:\n%s", output)
+	}
+
+	command = exec.Command(script, "preflight", configPath)
+	command.Dir = repoRoot
+	command.Env = append(
+		os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"MOCK_ACTIVE_GPU_WORKLOAD=true",
+	)
+	output, err = command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("preflight unexpectedly accepted an active GPU workload:\n%s", output)
+	}
+	if !strings.Contains(string(output), "provider Nodes have active GPU workloads") {
+		t.Fatalf("active GPU workload failure is unclear:\n%s", output)
 	}
 }
 

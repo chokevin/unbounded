@@ -275,6 +275,7 @@ preflight_context() {
 
 preflight_nodes() {
   local nodes_json="${WORK_DIR}/nodes.json"
+  local pods_json="${WORK_DIR}/pods.json"
   kube get nodes -l "${SELECTOR}" -o json >"${nodes_json}"
 
   local count
@@ -307,6 +308,31 @@ preflight_nodes() {
   if [[ -n "${violations}" ]]; then
     printf 'error: node preflight failed\n' >&2
     printf '%s\n' "${violations}" >&2
+    exit 1
+  fi
+
+  kube get pods -A -o json >"${pods_json}"
+  local gpu_consumers
+  gpu_consumers="$(
+    jq -r --slurpfile nodes "${nodes_json}" '
+      [$nodes[0].items[].metadata.name] as $selected |
+      .items[] |
+      select(
+        (.spec.nodeName // "") as $node |
+        ($selected | index($node)) != null
+      ) |
+      select(.status.phase != "Succeeded" and .status.phase != "Failed") |
+      ([
+        .spec.containers[]?.resources.requests["nvidia.com/gpu"] // 0,
+        .spec.initContainers[]?.resources.requests["nvidia.com/gpu"] // 0
+      ] | map(tonumber) | add // 0) as $requested |
+      select($requested > 0) |
+      "\(.metadata.namespace)/\(.metadata.name): node=\(.spec.nodeName) requestedGPUs=\($requested)"
+    ' "${pods_json}"
+  )"
+  if [[ -n "${gpu_consumers}" ]]; then
+    printf 'error: provider Nodes have active GPU workloads\n' >&2
+    printf '%s\n' "${gpu_consumers}" >&2
     exit 1
   fi
 }
@@ -887,7 +913,10 @@ wait_for_smoke() {
           )
         )] | length' <<<"${campaigns}"
     )"
-    [[ "${failed}" == "0" ]] || fail "smoke produced a non-passing Run"
+    if [[ "${failed}" != "0" ]]; then
+      cancel_runs_for_policy "${policy_name}"
+      fail "smoke produced a non-passing Run"
+    fi
     if [[ "${completed}" == "${EXPECTED_NODES}" && "${succeeded}" == "${EXPECTED_NODES}" ]]; then
       printf 'smoke passed on all %s Nodes\n' "${EXPECTED_NODES}"
       return
@@ -895,6 +924,32 @@ wait_for_smoke() {
     sleep 10
   done
   fail "smoke did not complete on all Nodes within 30 minutes"
+}
+
+cancel_runs_for_policy() {
+  local policy_name="$1"
+  local campaigns runs_json run phase
+  campaigns="$(
+    kube -n "${namespace}" get certificationcampaigns -o json |
+      jq -c --arg policy "${policy_name}" \
+        '[.items[] | select(.spec.policy.name == $policy) | .metadata.name]'
+  )"
+  runs_json="$(kube -n "${namespace}" get certificationruns -o json)"
+
+  while IFS=$'\t' read -r run phase; do
+    [[ -n "${run}" ]] || continue
+    if [[ ! "${phase}" =~ ^(Succeeded|Failed|Inconclusive|Canceled)$ ]]; then
+      kube -n "${namespace}" patch certificationrun "${run}" \
+        --type=merge -p '{"spec":{"cancel":true}}'
+    fi
+  done < <(
+    jq -r --argjson campaigns "${campaigns}" '
+      .items[] |
+      select($campaigns | index(.metadata.labels["signal.unbounded-cloud.io/campaign"])) |
+      [.metadata.name, (.status.phase // "")] |
+      @tsv
+    ' <<<"${runs_json}"
+  )
 }
 
 run_mode() {

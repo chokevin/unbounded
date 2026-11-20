@@ -85,7 +85,8 @@ config=/secure/path/provider-certification.yaml
 `start` is the normal clean-cluster path. Each phase discovers the complete
 Node population matching the provider selector. It stops before the 24-hour
 launch if any selected Node is unhealthy, unschedulable, missing its provider
-label, or does not expose the expected GPU inventory; if the smoke fails; if
+label, does not expose the expected GPU inventory, or has an active Pod
+requesting GPUs; if the smoke fails; if
 the cluster label is generic or mismatched; or if remote-write reports
 non-recoverable failures. Deliberate `write_relabel_configs` filtering is
 allowed; required controller and provider-attributed GPU series must still be
