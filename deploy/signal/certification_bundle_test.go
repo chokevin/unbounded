@@ -579,6 +579,41 @@ func TestProviderCertificationHidesGenericArgoNotes(t *testing.T) {
 	}
 }
 
+func TestProviderCertificationUninstallStopsCampaignsBeforeRuns(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(script)
+	uninstallStart := strings.Index(source, "uninstall_all() {")
+	if uninstallStart == -1 {
+		t.Fatal("uninstall function not found")
+	}
+
+	uninstallEnd := strings.Index(source[uninstallStart:], "\n}\n")
+	if uninstallEnd == -1 {
+		t.Fatal("uninstall function end not found")
+	}
+
+	uninstall := source[uninstallStart : uninstallStart+uninstallEnd]
+	deleteCampaigns := strings.Index(uninstall, "delete certificationcampaigns --all")
+	cancelRuns := strings.Index(uninstall, "cancel_and_release_runs")
+	if deleteCampaigns == -1 || cancelRuns == -1 {
+		t.Fatal("uninstall campaign or Run cleanup step not found")
+	}
+
+	if deleteCampaigns > cancelRuns {
+		t.Fatal("uninstall can let an active Campaign replace a canceled Run")
+	}
+}
+
 func TestProviderCertificationAuthorityUsesImageSourceCommit(t *testing.T) {
 	t.Parallel()
 

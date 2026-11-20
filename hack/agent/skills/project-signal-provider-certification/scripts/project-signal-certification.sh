@@ -1165,9 +1165,9 @@ uninstall_all() {
   render_metrics_overlay
 
   kube delete certificationcampaignpolicies --all --ignore-not-found
-  cancel_and_release_runs
   kube -n "${namespace}" delete certificationcampaigns --all \
     --ignore-not-found
+  cancel_and_release_runs
   kube delete \
     certificationprofiles,certificationsuites,certificationtests,certificationpolicies \
     --all --ignore-not-found
