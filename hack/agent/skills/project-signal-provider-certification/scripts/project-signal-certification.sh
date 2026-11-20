@@ -109,11 +109,11 @@ kube() {
 
 kube_apply_file() {
   local path="$1"
-  local namespace="${2:-}"
+  local target_namespace="${2:-}"
   local -a namespace_args=()
 
-  if [[ -n "${namespace}" ]]; then
-    namespace_args=(-n "${namespace}")
+  if [[ -n "${target_namespace}" ]]; then
+    namespace_args=(-n "${target_namespace}")
   fi
 
   if [[ -n "${REMOTE_HOST:-}" ]]; then
