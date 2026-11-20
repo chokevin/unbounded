@@ -698,6 +698,38 @@ func TestProviderCertificationAuthorityUsesImageSourceCommit(t *testing.T) {
 	}
 }
 
+func TestProviderCertificationApprovalUsesImageSourceCommit(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	approvalStart := strings.Index(string(script), "approve_test_manifest()")
+	if approvalStart == -1 {
+		t.Fatal("Test approval function not found")
+	}
+
+	approvalEnd := strings.Index(string(script)[approvalStart:], "\n}\n")
+	if approvalEnd == -1 {
+		t.Fatal("Test approval function end not found")
+	}
+
+	approval := string(script)[approvalStart : approvalStart+approvalEnd]
+	if !strings.Contains(approval, `source_commit="${SOURCE_COMMIT}"`) {
+		t.Fatal("Test approval does not use the source commit embedded in the images")
+	}
+
+	if strings.Contains(approval, "rev-parse HEAD") {
+		t.Fatal("Test approval incorrectly uses the lifecycle checkout commit")
+	}
+}
+
 func TestProviderCertificationResetsOnlyEmptyExpiredSmokeCampaigns(t *testing.T) {
 	t.Parallel()
 

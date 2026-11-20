@@ -526,7 +526,7 @@ approve_test_manifest() {
       --name "${name}" \
       --field spec
   )"
-  source_commit="$(git -C "${repo_root}" rev-parse HEAD)"
+  source_commit="${SOURCE_COMMIT}"
   kube patch certificationtest "${name}" \
     --subresource=status \
     --type=merge \

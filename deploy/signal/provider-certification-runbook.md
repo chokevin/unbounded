@@ -34,8 +34,8 @@ Run, or required metric is unhealthy.
 
 The operator workstation requires:
 
-- a clean checkout at the exact source revision used by the controller and
-  adapter images;
+- a clean, reviewed checkout containing the provider-certification lifecycle
+  and certification package;
 - `bash`, `git`, `make`, `kubectl`, `helm`, `jq`, `yq`, `curl`, and `awk`;
 - kubeconfig access to the target cluster, directly or through a jumpbox; and
 - an organization-owned remote-write overlay and metrics identity.
@@ -78,7 +78,7 @@ Replace every placeholder.
 | `spec.context` | Exact kubeconfig context | `kubectl --context <context> cluster-info` succeeds |
 | `spec.cluster` | Stable identity used as the central `cluster` metric label | Must not be `cluster` or `default`; must exactly match the metrics overlay |
 | `spec.environment` | Bounded environment classification | Must not contain a placeholder |
-| `spec.sourceCommit` | Full 40-character controller and adapter source commit | Must equal `git rev-parse HEAD` in this checkout |
+| `spec.sourceCommit` | Full 40-character controller and adapter source commit | Must identify the immutable images; it does not need to equal the lifecycle checkout HEAD |
 | `spec.nodeSelector` | Smallest labels selecting all intended Nodes and no others | Review `kubectl get nodes -l '<selector>'` |
 | `spec.providerLabel` | Canonical provider label | Must remain `unbounded-cloud.io/site` |
 | `spec.expectedGPUCount` | GPUs per selected worker | Must remain `8` |
