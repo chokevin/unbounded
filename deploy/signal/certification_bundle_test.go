@@ -82,8 +82,13 @@ func TestProviderCertificationInitCreatesPortableWorkspace(t *testing.T) {
 	)
 
 	command.Dir = repoRoot
-	if output, runErr := command.CombinedOutput(); runErr != nil {
+	output, runErr := command.CombinedOutput()
+	if runErr != nil {
 		t.Fatalf("initialize provider certification workspace: %v\n%s", runErr, output)
+	}
+
+	if !strings.Contains(string(output), "ACTION=preflight") {
+		t.Fatalf("initializer does not direct operators through read-only preflight:\n%s", output)
 	}
 
 	config, err := os.ReadFile(filepath.Join(target, "provider-certification.yaml"))
@@ -384,6 +389,193 @@ func TestProviderCertificationAllowsIntentionalRemoteWriteFiltering(t *testing.T
 
 	if !strings.Contains(string(script), "prometheus_remote_storage_samples_failed_total") {
 		t.Fatal("remote-write validation no longer checks non-recoverable failures")
+	}
+}
+
+func TestProviderCertificationMetricsRequireInstallation(t *testing.T) {
+	t.Parallel()
+
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	writeExecutable(t, filepath.Join(binDir, "kubectl"), `#!/usr/bin/env bash
+exit 1
+`)
+
+	script := filepath.Join(
+		repoRoot,
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	)
+	command := exec.Command(
+		"bash",
+		"-c",
+		`source "$1"; CONTEXT=test-context; REMOTE_HOST=""; WORK_DIR="$2"; validate_metrics`,
+		"bash",
+		script,
+		t.TempDir(),
+	)
+	command.Dir = repoRoot
+	command.Env = append(
+		os.Environ(),
+		"PROJECT_SIGNAL_LIB_ONLY=true",
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+	)
+
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("metrics validation unexpectedly accepted a missing installation:\n%s", output)
+	}
+
+	if !strings.Contains(string(output), "run ACTION=install or ACTION=start first") {
+		t.Fatalf("missing-installation failure is unclear:\n%s", output)
+	}
+}
+
+func TestProviderCertificationMetricsCleanUpFailedPortForward(t *testing.T) {
+	t.Parallel()
+
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tempDir := t.TempDir()
+	binDir := filepath.Join(tempDir, "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	pidFile := filepath.Join(tempDir, "port-forward.pid")
+	writeExecutable(t, filepath.Join(binDir, "kubectl"), `#!/usr/bin/env bash
+set -euo pipefail
+
+case "$*" in
+  *" get namespace project-signal"|*" get service project-signal-central-prometheus")
+    exit 0
+    ;;
+  *" port-forward service/project-signal-central-prometheus 19090:9090")
+    printf '%s\n' "$$" >"${MOCK_PID_FILE}"
+    sleep 300
+    ;;
+  *)
+    printf 'unexpected kubectl invocation: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+`)
+	writeExecutable(t, filepath.Join(binDir, "curl"), `#!/usr/bin/env bash
+exit 1
+`)
+	writeExecutable(t, filepath.Join(binDir, "seq"), `#!/usr/bin/env bash
+printf '1\n'
+`)
+
+	script := filepath.Join(
+		repoRoot,
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	)
+	command := exec.Command(
+		"bash",
+		"-c",
+		`source "$1"; CONTEXT=test-context; REMOTE_HOST=""; WORK_DIR="$2"; validate_metrics`,
+		"bash",
+		script,
+		tempDir,
+	)
+	command.Dir = repoRoot
+	command.Env = append(
+		os.Environ(),
+		"PROJECT_SIGNAL_LIB_ONLY=true",
+		"MOCK_PID_FILE="+pidFile,
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+	)
+
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("metrics validation unexpectedly succeeded:\n%s", output)
+	}
+
+	pidBytes, readErr := os.ReadFile(pidFile)
+	if readErr != nil {
+		t.Fatalf("read port-forward PID: %v\n%s", readErr, output)
+	}
+
+	pid := strings.TrimSpace(string(pidBytes))
+	if pid == "" {
+		t.Fatalf("mock port-forward did not record its PID:\n%s", output)
+	}
+
+	if processErr := exec.Command("kill", "-0", pid).Run(); processErr == nil {
+		_ = exec.Command("kill", pid).Run()
+		t.Fatalf("failed metrics validation leaked port-forward process %s", pid)
+	}
+}
+
+func TestProviderCertificationStatusDoesNotRequireCleanSource(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(script)
+	statusStart := strings.Index(source, "status() {")
+	if statusStart == -1 {
+		t.Fatal("status function not found")
+	}
+
+	statusEnd := strings.Index(source[statusStart:], "\n}\n")
+	if statusEnd == -1 {
+		t.Fatal("status function end not found")
+	}
+
+	status := source[statusStart : statusStart+statusEnd]
+	if !strings.Contains(status, "preflight_config") {
+		t.Fatal("status no longer validates its deployment configuration")
+	}
+
+	if strings.Contains(status, "verify_certification_source") {
+		t.Fatal("read-only status requires a clean certification source checkout")
+	}
+
+	preflightStart := strings.Index(source, "preflight() {")
+	if preflightStart == -1 {
+		t.Fatal("preflight function not found")
+	}
+
+	preflightEnd := strings.Index(source[preflightStart:], "\n}\n")
+	if preflightEnd == -1 {
+		t.Fatal("preflight function end not found")
+	}
+
+	preflight := source[preflightStart : preflightStart+preflightEnd]
+	if !strings.Contains(preflight, "verify_certification_source") {
+		t.Fatal("mutating certification lifecycle no longer verifies clean source")
+	}
+}
+
+func TestProviderCertificationHidesGenericArgoNotes(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count := strings.Count(string(script), "--hide-notes"); count != 2 {
+		t.Fatalf("expected local and remote Argo installs to hide generic chart notes, found %d", count)
 	}
 }
 

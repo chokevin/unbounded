@@ -250,7 +250,9 @@ preflight_config() {
     [[ "${image}" =~ @sha256:[0-9a-f]{64}$ ]] ||
       fail "${image_path} must be an immutable SHA-256 image reference"
   done
+}
 
+verify_certification_source() {
   local tracked_path
   for tracked_path in \
     "${plan#"${repo_root}"/}" \
@@ -401,6 +403,7 @@ render_metrics_overlay() {
 preflight() {
   require_commands
   preflight_config
+  verify_certification_source
   preflight_context
   preflight_nodes
   render_metrics_overlay
@@ -481,6 +484,7 @@ install_argo() {
       --create-namespace \
       --version "${argo_chart_version}" \
       --values - \
+      --hide-notes \
       --wait \
       --timeout 10m <"${argo_values}"
   else
@@ -492,6 +496,7 @@ install_argo() {
       --create-namespace \
       --version "${argo_chart_version}" \
       --values "${argo_values}" \
+      --hide-notes \
       --wait \
       --timeout 10m
   fi
@@ -711,17 +716,22 @@ validate_metrics() {
   local port_forward_pid
   local response value
 
+  kube get namespace "${namespace}" >/dev/null 2>&1 ||
+    fail "Project Signal is not installed; run ACTION=install or ACTION=start first"
+  kube -n "${namespace}" get service project-signal-central-prometheus >/dev/null 2>&1 ||
+    fail "Project Signal metrics are not installed; run ACTION=install or ACTION=start first"
+
   if [[ -n "${REMOTE_HOST:-}" ]]; then
     validate_metrics_remote
 
     return
   fi
 
-  kube -n "${namespace}" port-forward \
+  kubectl --context "${CONTEXT}" -n "${namespace}" port-forward \
     service/project-signal-central-prometheus 19090:9090 \
     >"${port_forward_log}" 2>&1 &
   port_forward_pid=$!
-  trap 'kill "${port_forward_pid}" 2>/dev/null || true' EXIT
+  trap "kill ${port_forward_pid} 2>/dev/null || true; wait ${port_forward_pid} 2>/dev/null || true" EXIT
 
   for _ in $(seq 1 30); do
     if curl -fsS "http://127.0.0.1:19090/-/ready" >/dev/null 2>&1; then
@@ -1149,6 +1159,7 @@ clean_node_markers() {
 uninstall_all() {
   require_commands
   preflight_config
+  verify_certification_source
   preflight_context
   render_signal_phase base
   render_metrics_overlay

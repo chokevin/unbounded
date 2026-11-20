@@ -38,7 +38,11 @@ Created a self-contained Project Signal provider certification workspace:
 Next:
   1. Replace every placeholder in the config and metrics overlay.
   2. Create the referenced remote-write identity Secret in the cluster.
-  3. Run:
+  3. Validate the complete configuration without changing the cluster:
+     make signal-provider-certification \\
+       ACTION=preflight \\
+       CONFIG=${config}
+  4. Install, smoke-test, and launch certification:
      make signal-provider-certification \\
        ACTION=start \\
        CONFIG=${config}

@@ -104,6 +104,10 @@ non-recoverable failures. Deliberate `write_relabel_configs` filtering is
 allowed; required controller and provider-attributed GPU series must still be
 present.
 
+The standalone `smoke`, `run`, and `status` actions require an existing
+installation. Use `install` first when running phases individually, or use
+`start` for the complete clean-cluster sequence.
+
 ## Trust decision
 
 Applying a `CertificationTest` never approves it. The install command computes
