@@ -137,10 +137,12 @@ closed.
 
 ## Provider certification
 
-The repository includes a reproducible 24-hour whole-node certification bundle
-under `deploy/signal/certification/whole-node-24h/`. It embeds the reviewed burn
-script in the `CertificationTest`, verifies the script digest before execution,
-and does not depend on a pre-created script ConfigMap.
+The repository includes an example 24-hour whole-node certification bundle
+under `deploy/signal/certification/whole-node-24h/`. Provider onboarding copies
+that bundle into a user-owned workspace. The user may replace its
+CertificationPlan, scripts, WorkflowTemplates, and inputs before preflight.
+Compilation embeds source artifacts in the `CertificationTest` and verifies
+their digests before execution.
 
 Use the
 `hack/agent/skills/project-signal-provider-certification/` skill for the
@@ -158,12 +160,13 @@ Operators who are new to Signal should follow the
 documents every configuration field, jumpbox behavior, metrics ownership,
 preflight correction, monitoring gate, teardown check, and clean-room retry.
 
-The public repository owns the controllers, burn contract, DCGM exporter,
-Prometheus base, label semantics, and validation gates. The organization-owned
-Kustomize overlay owns internal remote-write endpoints, identities, Secret
-references, and Grafana assignments. Start that overlay from
-`deploy/signal/observability/overlay.example/`; never commit real internal
-values to this repository.
+Unbounded must already be active on the cluster. Project Signal owns the
+controllers, DCGM exporter, Prometheus base, label semantics, validation gates,
+execution, and cleanup. The user-owned certification workspace supplies the
+plan sources, Grafana domain, Prometheus remote-write endpoint, identity or
+Secret references, and dashboard assignment. Start the metrics overlay from
+`deploy/signal/observability/overlay.example/`; never commit live values to
+this repository.
 
 ## CertificationSuite contract
 
@@ -901,10 +904,10 @@ certification evidence remains durable in immutable evidence ConfigMaps
 independently of Prometheus.
 
 For ADX-Mon and Prometheus-compatible central monitoring, label semantics, GPU
-telemetry requirements, validation, and the public/internal ownership boundary,
-follow the [observability integration guide](observability-sop.md). Exact
-subscriptions, resource instances, identities, endpoints, dashboard JSON, and
-cluster assignments belong in the internal deployment layer.
+telemetry requirements, validation, and deployment ownership, follow the
+[observability integration guide](observability-sop.md). Exact subscriptions,
+resource instances, identities, endpoints, dashboard JSON, and cluster
+assignments belong in the user-owned certification workspace.
 
 After each stage completes, the controller validates the immutable stage result
 and publishes its bounded typed measurement projection in Run status while the

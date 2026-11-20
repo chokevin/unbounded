@@ -57,7 +57,7 @@ name. A later test generation requires a new approval decision.
 ## Source plans and generated tests
 
 `CertificationTest` objects are deployment artifacts, not the preferred
-authoring surface for repository-owned scripts. Authors define a versioned
+authoring surface for user-owned scripts. Authors define a versioned
 `CertificationPlan` file, place script or Python sources under its declared
 `spec.sourceRoot`, and select one digest-pinned image from the plan's named
 runtime catalog for each Script or Container driver.
@@ -81,6 +81,26 @@ Generated YAML may be committed for GitOps and direct cluster application, but
 it is never edited by hand. The plan, source files, and digest-pinned runtime
 catalog are authoritative. The bindings file is the cluster-specific trust
 input. CI should render the plan and reject stale generated output.
+
+## Provider onboarding boundary
+
+Provider certification assumes Unbounded is already active on the target
+cluster. Project Signal does not create Machines, provider labels, or the
+underlying observability service.
+
+The user supplies one certification workspace before installation:
+
+- the CertificationPlan;
+- every referenced script and WorkflowTemplate;
+- separate bounded smoke and qualification inputs;
+- the Grafana HTTPS origin; and
+- the Prometheus remote-write overlay and credential references.
+
+The lifecycle compiles and applies the configured plan, records approval for
+every exact Test generation and content digest, captures live bindings, renders
+the bound Suite, validates metrics, runs the smoke, and launches the
+qualification campaign. There is no separate internal or external
+certification package.
 
 ## Suites and scheduling
 

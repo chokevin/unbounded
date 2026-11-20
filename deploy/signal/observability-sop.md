@@ -3,8 +3,7 @@
 ## Purpose and ownership boundary
 
 Project Signal exposes Prometheus metrics and includes a namespace-local
-Prometheus deployment for immediate troubleshooting. Production monitoring
-requires an external observability system.
+Prometheus deployment for immediate troubleshooting. Production monitoring requires the user-selected observability system.
 
 This open source document defines the portable integration contract:
 
@@ -14,7 +13,7 @@ This open source document defines the portable integration contract:
 - GPU exporter requirements; and
 - backend-independent validation and failure handling.
 
-An organization-specific deployment document must define:
+The certification workspace must define:
 
 - the subscription, resource group, and resource instances to use;
 - the exact ADX-Mon, metrics backend, and Grafana endpoints;
@@ -23,8 +22,8 @@ An organization-specific deployment document must define:
 - immutable dashboard artifact revisions; and
 - environment-specific rollout and rollback commands.
 
-Do not add those organization-specific values to this repository. The public
-integration contract should remain usable with any conforming deployment.
+Do not add live deployment values to this repository. The integration contract
+remains usable with any conforming deployment.
 
 ## Metric label contract
 
@@ -71,8 +70,8 @@ discovers the controller and live telemetry Pods through their
 `adx-mon/scrape`, `adx-mon/port`, and `adx-mon/path` annotations.
 
 Configure bounded cluster identity and Kubernetes node metadata in the
-collector. The exact resource names and endpoints belong in the internal
-deployment document.
+collector. The exact resource names and endpoints belong in the protected certification
+workspace.
 
 ```toml
 [add-labels]
@@ -124,16 +123,15 @@ workload, GPU, and its own transport metrics. The overlay must:
 - expose sent, failed, retried, pending, and dropped sample metrics.
 
 Backend URLs, identity IDs, tenant IDs, and role assignments belong only in the
-internal deployment document and overlay. Start from
+user-owned certification workspace. Start from
 `deploy/signal/observability/overlay.example/`. The provider certification
 skill rejects overlays with placeholders, a missing `remote_write` block, a
 cluster label that differs from its cluster config, or no provider-label
 derivation.
 
-## Internal deployment record
+## Deployment record
 
-Before deploying, record these values in the organization-owned deployment
-system:
+Before deploying, record these values with the certification evidence:
 
 | Input | Requirement |
 |---|---|
@@ -144,10 +142,10 @@ system:
 | Central metrics resources | Exact subscription and resource assignments |
 | Metrics authentication | Identity and Secret references, never literal credentials |
 | Grafana resources | Exact instance, data source, folder, and dashboard UID |
-| Dashboard revision | Immutable internal artifact revision |
+| Dashboard revision | Immutable dashboard artifact revision |
 | Rollback revision | Last known-good transport and dashboard revisions |
 
-The internal document should contain the exact commands needed to configure
+The deployment record should contain the exact commands needed to configure
 the approved resources. It must not redefine the public metric or label
 contract.
 
@@ -212,10 +210,10 @@ Run one short certification smoke and confirm:
 2. the current stage changes while the workload is active;
 3. live workload metrics appear when declared by the Test;
 4. terminal status and completed measurements appear after completion; and
-5. the internal Grafana dashboard shows the same cluster identity and Run
+5. the configured Grafana dashboard shows the same cluster identity and Run
    state.
 
-Save detailed command output in the internal validation record. PR-facing
+Save detailed command output in the protected validation record. PR-facing
 evidence must redact cluster, node, and provider values.
 
 ## Acceptance gate
@@ -241,8 +239,8 @@ Do not start a long certification or soak campaign before this gate passes.
 | Symptom | First check | Required action |
 |---|---|---|
 | Controller target is down locally | Service selector, Pod readiness, port 8080 | Fix the upstream deployment before checking Grafana |
-| Local metrics work but central metrics are absent | Transport authentication, queue, TLS, and endpoint | Fix the internal overlay; do not alter Signal metric code |
-| Central metrics exist but the dashboard is empty | Data source, dashboard revision, cluster and provider variables | Fix the internal Grafana layer |
+| Local metrics work but central metrics are absent | Transport authentication, queue, TLS, and endpoint | Fix the certification workspace overlay; do not alter Signal metric code |
+| Central metrics exist but the dashboard is empty | Data source, dashboard revision, cluster and provider variables | Fix the configured Grafana resources |
 | Provider is empty | Node metadata watcher and canonical site label | Derive it from `unbounded-cloud.io/site`; do not use pod Downward API |
 | Dashboard joins return duplicates | Empty or stale provider series | Exclude empty provider values and use a non-empty All matcher |
 | Live metrics disappear after a stage | Whether the workload exited | Expected for ephemeral live series; use completed measurements and evidence |
@@ -260,8 +258,8 @@ For teardown:
 1. stop new certification admission;
 2. wait for active Runs to release;
 3. confirm the central backend has received terminal metrics;
-4. remove the internal transport and dashboard assignment;
+4. remove the configured transport and dashboard assignment;
 5. remove the Signal deployment; and
-6. retain the internal deployment ledger and durable certification evidence
+6. retain the deployment ledger and durable certification evidence
    according to policy.
 

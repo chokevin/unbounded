@@ -8,16 +8,12 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly script_dir
 repo_root="$(cd "${script_dir}/../../../../.." && pwd)"
 readonly repo_root
-readonly plan="${repo_root}/deploy/signal/certification/whole-node-24h/certification-plan.yaml"
 readonly argo_values="${repo_root}/deploy/signal/argo-values.yaml"
 readonly argo_chart_version="2.0.12"
 readonly namespace="project-signal"
 readonly authority_namespace="project-signal-authority"
-readonly test_name="project-signal-whole-node-burn-v1"
 readonly baseline_test_name="project-signal-gpu-inventory-v1"
 readonly baseline_profile_name="project-signal-gpu-baseline-8x-v1"
-readonly suite_name="project-signal-whole-node-24h-v1"
-readonly profile_name="project-signal-whole-node-24h-8x-v1"
 
 usage() {
   cat <<'EOF'
@@ -67,7 +63,9 @@ require_commands() {
 resolve_config_path() {
   local path="$1"
 
-  if [[ "${path}" == /* ]]; then
+  if [[ -z "${path}" ]]; then
+    printf '\n'
+  elif [[ "${path}" == /* ]]; then
     printf '%s\n' "${path}"
   else
     printf '%s/%s\n' "$(cd "$(dirname "${CONFIG}")" && pwd)" "${path}"
@@ -105,6 +103,28 @@ kube() {
   else
     kubectl --context "${CONTEXT}" "$@"
   fi
+}
+
+kube_has_resource() {
+  local resource="$1"
+  local resources
+
+  resources="$(kube api-resources --api-group=signal.unbounded-cloud.io -o name)" ||
+    fail "could not discover registered Project Signal resources"
+  grep -Fxq "${resource}.signal.unbounded-cloud.io" <<<"${resources}"
+}
+
+kube_delete_all_if_registered() {
+  local resource="$1"
+  local target_namespace="${2:-}"
+  local -a namespace_args=()
+
+  kube_has_resource "${resource}" || return 0
+  if [[ -n "${target_namespace}" ]]; then
+    namespace_args=(-n "${target_namespace}")
+  fi
+
+  kube "${namespace_args[@]}" delete "${resource}" --all --ignore-not-found
 }
 
 kube_apply_file() {
@@ -156,27 +176,6 @@ kube_delete_directory() {
   done
 }
 
-delete_all_signal_resources() {
-  local resource="$1"
-  local target_namespace="${2:-}"
-  local crd
-  local -a namespace_args=()
-
-  if [[ -n "${target_namespace}" ]]; then
-    namespace_args=(-n "${target_namespace}")
-  fi
-
-  crd="$(
-    kube get customresourcedefinition \
-      "${resource}.signal.unbounded-cloud.io" \
-      --ignore-not-found \
-      -o name
-  )"
-  if [[ -n "${crd}" ]]; then
-    kube "${namespace_args[@]}" delete "${resource}" --all --ignore-not-found
-  fi
-}
-
 load_config() {
   local config_path="$1"
 
@@ -200,7 +199,12 @@ load_config() {
   EXPECTED_NODES=0
   EXPECTED_GPUS="$(jq -r '.spec.expectedGPUCount // 0' "${CONFIG_JSON}")"
   PROVIDER_LABEL="$(jq -r '.spec.providerLabel // ""' "${CONFIG_JSON}")"
-  METRICS_OVERLAY="$(jq -r '.spec.metricsOverlay // ""' "${CONFIG_JSON}")"
+  PLAN="$(jq -r '.spec.certification.plan // ""' "${CONFIG_JSON}")"
+  SMOKE_INPUTS="$(jq -r '.spec.certification.smokeInputs // ""' "${CONFIG_JSON}")"
+  RUN_INPUTS="$(jq -r '.spec.certification.runInputs // ""' "${CONFIG_JSON}")"
+  PROFILE_NAME="$(jq -r '.spec.certification.profileName // ""' "${CONFIG_JSON}")"
+  GRAFANA_DOMAIN="$(jq -r '.spec.observability.grafanaDomain // ""' "${CONFIG_JSON}")"
+  METRICS_OVERLAY="$(jq -r '.spec.observability.metricsOverlay // ""' "${CONFIG_JSON}")"
   REMOTE_HOST="$(jq -r '.spec.execution.ssh.host // ""' "${CONFIG_JSON}")"
   INSTALLATION="${config_name}"
   SELECTOR="$(
@@ -208,8 +212,13 @@ load_config() {
       map("\(.key)=\(.value|tostring)") | join(",")' "${CONFIG_JSON}"
   )"
 
-  [[ "${METRICS_OVERLAY}" = /* ]] ||
-    METRICS_OVERLAY="$(cd "$(dirname "${CONFIG}")" && pwd)/${METRICS_OVERLAY}"
+  PLAN="$(resolve_config_path "${PLAN}")"
+  SMOKE_INPUTS="$(resolve_config_path "${SMOKE_INPUTS}")"
+  RUN_INPUTS="$(resolve_config_path "${RUN_INPUTS}")"
+  METRICS_OVERLAY="$(resolve_config_path "${METRICS_OVERLAY}")"
+  PLAN_NAME="$(yq -r '.metadata.name // ""' "${PLAN}" 2>/dev/null || true)"
+  SUITE_NAME="$(yq -r '.spec.suite.name // ""' "${PLAN}" 2>/dev/null || true)"
+  mapfile -t TEST_NAMES < <(yq -r '.spec.tests[] | .name' "${PLAN}" 2>/dev/null || true)
 
   if [[ -n "${REMOTE_HOST}" ]]; then
     local remote_port identity_file control_path
@@ -252,7 +261,12 @@ preflight_config() {
   reject_placeholder "spec.cluster" "${CLUSTER}"
   reject_placeholder "spec.environment" "${ENVIRONMENT}"
   reject_placeholder "spec.sourceCommit" "${SOURCE_COMMIT}"
-  reject_placeholder "spec.metricsOverlay" "${METRICS_OVERLAY}"
+  reject_placeholder "spec.certification.plan" "${PLAN}"
+  reject_placeholder "spec.certification.smokeInputs" "${SMOKE_INPUTS}"
+  reject_placeholder "spec.certification.runInputs" "${RUN_INPUTS}"
+  reject_placeholder "spec.certification.profileName" "${PROFILE_NAME}"
+  reject_placeholder "spec.observability.grafanaDomain" "${GRAFANA_DOMAIN}"
+  reject_placeholder "spec.observability.metricsOverlay" "${METRICS_OVERLAY}"
   [[ "${CLUSTER}" != "cluster" && "${CLUSTER}" != "default" ]] ||
     fail "spec.cluster must be the actual cluster identifier"
   [[ "${EXPECTED_GPUS}" == "8" ]] ||
@@ -262,8 +276,38 @@ preflight_config() {
   [[ "${PROVIDER_LABEL}" == "unbounded-cloud.io/site" ]] ||
     fail "spec.providerLabel must be unbounded-cloud.io/site"
   [[ -n "${SELECTOR}" ]] || fail "spec.nodeSelector must not be empty"
+  [[ -f "${PLAN}" ]] || fail "spec.certification.plan must name a CertificationPlan file"
+  [[ -f "${SMOKE_INPUTS}" ]] ||
+    fail "spec.certification.smokeInputs must name a CertificationPlanInputs file"
+  [[ -f "${RUN_INPUTS}" ]] ||
+    fail "spec.certification.runInputs must name a CertificationPlanInputs file"
+  [[ "$(yq -r '.kind // ""' "${PLAN}")" == "CertificationPlan" ]] ||
+    fail "spec.certification.plan must contain kind CertificationPlan"
+  [[ "$(yq -r '.kind // ""' "${SMOKE_INPUTS}")" == "CertificationPlanInputs" ]] ||
+    fail "spec.certification.smokeInputs must contain kind CertificationPlanInputs"
+  [[ "$(yq -r '.kind // ""' "${RUN_INPUTS}")" == "CertificationPlanInputs" ]] ||
+    fail "spec.certification.runInputs must contain kind CertificationPlanInputs"
+  [[ "$(yq -r '.metadata.name // ""' "${SMOKE_INPUTS}")" == "${PLAN_NAME}" ]] ||
+    fail "smoke inputs metadata.name must match CertificationPlan metadata.name"
+  [[ "$(yq -r '.metadata.name // ""' "${RUN_INPUTS}")" == "${PLAN_NAME}" ]] ||
+    fail "run inputs metadata.name must match CertificationPlan metadata.name"
+  [[ "${PROFILE_NAME}" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] ||
+    fail "spec.certification.profileName must be a DNS label"
+  [[ "${PLAN_NAME}" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] ||
+    fail "spec.certification.plan metadata.name must be a DNS label"
+  [[ "${SUITE_NAME}" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] ||
+    fail "spec.certification.plan must define spec.suite.name"
+  [[ "${#TEST_NAMES[@]}" -gt 0 ]] ||
+    fail "spec.certification.plan must define at least one Test"
+  local test_name
+  for test_name in "${TEST_NAMES[@]}"; do
+    [[ "${test_name}" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] ||
+      fail "CertificationPlan Test name ${test_name} must be a DNS label"
+  done
+  [[ "${GRAFANA_DOMAIN}" =~ ^https://[^/]+/?$ ]] ||
+    fail "spec.observability.grafanaDomain must be an HTTPS origin without a path"
   [[ -d "${METRICS_OVERLAY}" && -f "${METRICS_OVERLAY}/kustomization.yaml" ]] ||
-    fail "spec.metricsOverlay must name a Kustomize directory"
+    fail "spec.observability.metricsOverlay must name a Kustomize directory"
 
   local image
   for image_path in '.spec.images.controller' '.spec.images.adapter'; do
@@ -276,9 +320,6 @@ preflight_config() {
 verify_certification_source() {
   local tracked_path
   for tracked_path in \
-    "${plan#"${repo_root}"/}" \
-    deploy/signal/certification/whole-node-24h/workflow-template.yaml \
-    deploy/signal/certification/whole-node-24h/gpu-burn-canary.sh \
     deploy/signal/observability/base/kustomization.yaml \
     hack/agent/skills/project-signal-provider-certification/SKILL.md; do
     git -C "${repo_root}" ls-files --error-unmatch "${tracked_path}" >/dev/null ||
@@ -290,6 +331,24 @@ verify_certification_source() {
     deploy/signal/argo-values.yaml \
     hack/agent/skills/project-signal-provider-certification ||
     fail "certification source has uncommitted changes"
+}
+
+preflight_certification_definition() {
+  (
+    cd "${repo_root}"
+    go run ./cmd/kubectl-unbounded signal render \
+      --filename "${PLAN}" \
+      --tests-only >"${WORK_DIR}/preflight-tests.yaml"
+  )
+}
+
+preflight_unbounded() {
+  local resources
+
+  resources="$(kube api-resources --api-group=unbounded-cloud.io -o name)" ||
+    fail "could not discover the active Unbounded installation"
+  grep -Fxq "machines.unbounded-cloud.io" <<<"${resources}" ||
+    fail "Unbounded must already be active: machines.unbounded-cloud.io is not registered"
 }
 
 preflight_context() {
@@ -425,7 +484,9 @@ preflight() {
   require_commands
   preflight_config
   verify_certification_source
+  preflight_certification_definition
   preflight_context
+  preflight_unbounded
   preflight_nodes
   render_metrics_overlay
   printf 'preflight passed: context=%s cluster=%s nodes=%s selector=%s\n' \
@@ -634,25 +695,28 @@ install_execution_authority() {
 install_catalog() {
   local tests="${WORK_DIR}/certification-tests.yaml"
   local bindings="${WORK_DIR}/certification-bindings.yaml"
+  local test_name
 
   (
     cd "${repo_root}"
     go run ./cmd/kubectl-unbounded signal render \
-      --filename "${plan}" \
+      --filename "${PLAN}" \
       --tests-only >"${tests}"
   )
   kube_apply_file "${tests}"
 
-  approve_test_manifest \
-    "${tests}" \
-    "${test_name}" \
-    "${WORK_DIR}/whole-node-test.json"
+  for test_name in "${TEST_NAMES[@]}"; do
+    approve_test_manifest \
+      "${tests}" \
+      "${test_name}" \
+      "${WORK_DIR}/test-${test_name}.json"
+  done
 
   (
     cd "${repo_root}"
     go run ./cmd/kubectl-unbounded signal bindings \
       --context "${CONTEXT}" \
-      --filename "${plan}" >"${bindings}"
+      --filename "${PLAN}" >"${bindings}"
   )
 }
 
@@ -799,59 +863,27 @@ install_all() {
   validate_metrics
 }
 
-write_inputs() {
-  local duration="$1"
-  local output="$2"
-  local environment_json
-
-  environment_json="$(
-    jq -cn \
-      --arg duration "${duration}" \
-      --arg cpuWorkers "$(config_value '.spec.cpuWorkers')" \
-      --arg expectedGPU "${EXPECTED_GPUS}" \
-      --arg product "$(config_value '.spec.expectedGPUProductRegex')" \
-      --arg memory "$(config_value '.spec.memoryMiB')" \
-      --arg sample "$(config_value '.spec.sampleIntervalSeconds')" \
-      --arg storage "$(config_value '.spec.storageMiB')" \
-      '{
-        BURN_DURATION_SECONDS:$duration,
-        CPU_WORKERS:$cpuWorkers,
-        EXPECTED_GPU_COUNT:$expectedGPU,
-        EXPECTED_GPU_PRODUCT_REGEX:$product,
-        MEMORY_MIB:$memory,
-        OBSERVED_GPU_ALLOCATABLE:$expectedGPU,
-        OBSERVED_GPU_CAPACITY:$expectedGPU,
-        POWER_LIMIT_CONSECUTIVE_SAMPLES:"3",
-        POWER_LIMIT_TOLERANCE_PERCENT:"5",
-        SAMPLE_INTERVAL_SECONDS:$sample,
-        STORAGE_MIB:$storage
-      }'
-  )"
-
-  jq -n \
-    --arg environment "${environment_json}" \
-    '{
-      apiVersion:"signal.unbounded-cloud.io/v1alpha1",
-      kind:"CertificationPlanInputs",
-      metadata:{name:"project-signal-whole-node-24h"},
-      spec:{stages:{"whole-node-burn":{parameters:[{
-        name:"environmentJson",
-        value:{type:"String",stringValue:$environment}
-      }]}}}
-    }' | yq -P >"${output}"
-}
-
 render_run_package() {
-  local duration="$1"
-  local mode="$2"
-  local inputs="${WORK_DIR}/certification-inputs-${mode}.yaml"
+  local mode="$1"
+  local inputs
   local package="${WORK_DIR}/certification-package-${mode}.yaml"
 
-  write_inputs "${duration}" "${inputs}"
+  case "${mode}" in
+    smoke)
+      inputs="${SMOKE_INPUTS}"
+      ;;
+    full)
+      inputs="${RUN_INPUTS}"
+      ;;
+    *)
+      fail "unknown run mode: ${mode}"
+      ;;
+  esac
+
   (
     cd "${repo_root}"
     go run ./cmd/kubectl-unbounded signal render \
-      --filename "${plan}" \
+      --filename "${PLAN}" \
       --bindings "${WORK_DIR}/certification-bindings.yaml" \
       --inputs "${inputs}" >"${package}"
   )
@@ -866,8 +898,8 @@ apply_profile_and_policy() {
   local campaigns empty_campaigns profile_uid policy_name
 
   jq -n \
-    --arg name "${profile_name}" \
-    --arg suite "${suite_name}" \
+    --arg name "${PROFILE_NAME}" \
+    --arg suite "${SUITE_NAME}" \
     --arg installation "${INSTALLATION}" \
     --argjson labels "$(jq '.spec.nodeSelector' "${CONFIG_JSON}")" \
     '{
@@ -886,7 +918,7 @@ apply_profile_and_policy() {
       }
     }' | yq -P >"${profile}"
   kube_apply_file "${profile}"
-  profile_uid="$(kube get certificationprofile "${profile_name}" \
+  profile_uid="$(kube get certificationprofile "${PROFILE_NAME}" \
     -o jsonpath='{.metadata.uid}')"
 
   policy_name="project-signal-${INSTALLATION}-${mode}"
@@ -920,7 +952,7 @@ apply_profile_and_policy() {
 
   jq -n \
     --arg name "${policy_name}" \
-    --arg profile "${profile_name}" \
+    --arg profile "${PROFILE_NAME}" \
     --arg profileUID "${profile_uid}" \
     --arg duration "${duration}s" \
     --arg installation "${INSTALLATION}" \
@@ -1085,7 +1117,7 @@ run_mode() {
       ;;
   esac
 
-  render_run_package "${duration}" "${mode}"
+  render_run_package "${mode}"
   apply_profile_and_policy "${duration}" "${mode}"
 
   if [[ "${mode}" == "smoke" ]]; then
@@ -1097,6 +1129,7 @@ run_mode() {
 
 status() {
   preflight_config
+  printf 'Grafana: %s\n\n' "${GRAFANA_DOMAIN}"
   printf 'Campaign policies:\n'
   kube get certificationcampaignpolicies \
     -l "signal.unbounded-cloud.io/installation=${INSTALLATION}" -o wide || true
@@ -1185,16 +1218,13 @@ uninstall_all() {
   render_signal_phase base
   render_metrics_overlay
 
-  delete_all_signal_resources certificationcampaignpolicies
-  delete_all_signal_resources certificationcampaigns "${namespace}"
+  kube_delete_all_if_registered certificationcampaignpolicies
+  kube_delete_all_if_registered certificationcampaigns "${namespace}"
   cancel_and_release_runs
-  for resource in \
-    certificationprofiles \
-    certificationsuites \
-    certificationtests \
-    certificationpolicies; do
-    delete_all_signal_resources "${resource}"
-  done
+  kube_delete_all_if_registered certificationprofiles
+  kube_delete_all_if_registered certificationsuites
+  kube_delete_all_if_registered certificationtests
+  kube_delete_all_if_registered certificationpolicies
 
   if [[ -n "${REMOTE_HOST:-}" ]]; then
     remote_exec helm uninstall project-signal-argo \

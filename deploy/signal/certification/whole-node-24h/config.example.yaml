@@ -14,11 +14,14 @@ spec:
   providerLabel: unbounded-cloud.io/site
   expectedGPUCount: 8
   expectedGPUProductRegex: "^NVIDIA B200$"
-  cpuWorkers: 32
-  memoryMiB: 8192
-  storageMiB: 8192
-  sampleIntervalSeconds: 10
-  metricsOverlay: replace-with-internal-metrics-overlay-directory
+  certification:
+    plan: certification/certification-plan.yaml
+    smokeInputs: certification/inputs-smoke.yaml
+    runInputs: certification/inputs-run.yaml
+    profileName: provider-24h
+  observability:
+    grafanaDomain: https://replace-with-grafana-domain
+    metricsOverlay: metrics-overlay
   # When the Kubernetes API is reachable only from a jumpbox, uncomment this
   # block. Paths are local paths and may be relative to this config file.
   # execution:

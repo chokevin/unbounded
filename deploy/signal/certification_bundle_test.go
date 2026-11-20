@@ -99,6 +99,20 @@ func TestProviderCertificationInitCreatesPortableWorkspace(t *testing.T) {
 	if !strings.Contains(string(config), "metricsOverlay: metrics-overlay") {
 		t.Fatal("generated config does not reference its local metrics overlay")
 	}
+	if !strings.Contains(string(config), "grafanaDomain: https://replace-with-grafana-domain") {
+		t.Fatal("generated config does not require the Grafana domain up front")
+	}
+	for _, path := range []string{
+		"certification-plan.yaml",
+		"gpu-burn-canary.sh",
+		"inputs-run.yaml",
+		"inputs-smoke.yaml",
+		"workflow-template.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(target, "certification", path)); err != nil {
+			t.Fatalf("generated workspace does not contain %s: %v", path, err)
+		}
+	}
 
 	kustomization, err := os.ReadFile(filepath.Join(target, "metrics-overlay", "kustomization.yaml"))
 	if err != nil {
@@ -145,11 +159,12 @@ func TestProviderCertificationRunbookDocumentsCompleteLifecycle(t *testing.T) {
 		"spec.providerLabel",
 		"spec.expectedGPUCount",
 		"spec.expectedGPUProductRegex",
-		"spec.cpuWorkers",
-		"spec.memoryMiB",
-		"spec.storageMiB",
-		"spec.sampleIntervalSeconds",
-		"spec.metricsOverlay",
+		"spec.certification.plan",
+		"spec.certification.smokeInputs",
+		"spec.certification.runInputs",
+		"spec.certification.profileName",
+		"spec.observability.grafanaDomain",
+		"spec.observability.metricsOverlay",
 		"spec.execution.ssh",
 		"spec.images.controller",
 		"spec.images.adapter",
@@ -208,6 +223,11 @@ case "$*" in
     ;;
   *" version --request-timeout=15s")
     printf 'ok\n'
+    ;;
+  *" api-resources --api-group=unbounded-cloud.io -o name")
+    if [[ "${MOCK_UNBOUNDED_MISSING:-false}" != "true" ]]; then
+      printf 'machines.unbounded-cloud.io\n'
+    fi
     ;;
   *" get nodes "*)
     if [[ "${MOCK_NODE_COUNT:-2}" == "0" ]]; then
@@ -284,11 +304,26 @@ spec:
   providerLabel: unbounded-cloud.io/site
   expectedGPUCount: 8
   expectedGPUProductRegex: "^NVIDIA B200$"
-  metricsOverlay: %s
+  certification:
+    plan: %s
+    smokeInputs: %s
+    runInputs: %s
+    profileName: dynamic-provider-test
+  observability:
+    grafanaDomain: https://grafana.example.invalid
+    metricsOverlay: %s
   images:
     controller: example.invalid/controller@sha256:%s
     adapter: example.invalid/adapter@sha256:%s
-`, strings.Repeat("c", 40), metricsDir, strings.Repeat("a", 64), strings.Repeat("b", 64))
+`,
+		strings.Repeat("c", 40),
+		filepath.Join(repoRoot, "deploy/signal/certification/whole-node-24h/certification-plan.yaml"),
+		filepath.Join(repoRoot, "deploy/signal/certification/whole-node-24h/inputs-smoke.yaml"),
+		filepath.Join(repoRoot, "deploy/signal/certification/whole-node-24h/inputs-run.yaml"),
+		metricsDir,
+		strings.Repeat("a", 64),
+		strings.Repeat("b", 64),
+	)
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -382,6 +417,52 @@ spec:
 	if !strings.Contains(string(output), "Machine not found") {
 		t.Fatalf("missing Machine failure is unclear:\n%s", output)
 	}
+
+	command = exec.Command(script, "preflight", configPath)
+	command.Dir = repoRoot
+
+	command.Env = append(
+		os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"MOCK_UNBOUNDED_MISSING=true",
+	)
+
+	output, err = command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("preflight unexpectedly accepted a cluster without Unbounded:\n%s", output)
+	}
+
+	if !strings.Contains(string(output), "Unbounded must already be active") {
+		t.Fatalf("missing-Unbounded failure is unclear:\n%s", output)
+	}
+}
+
+func TestProviderCertificationUsesConfiguredCertificationPlan(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(script)
+	if strings.Contains(source, `readonly plan="${repo_root}`) {
+		t.Fatal("provider lifecycle still hardcodes the repository certification plan")
+	}
+	if strings.Count(source, `--filename "${PLAN}"`) < 2 {
+		t.Fatal("catalog and run rendering do not both use the configured CertificationPlan")
+	}
+	if !strings.Contains(source, `for test_name in "${TEST_NAMES[@]}"`) {
+		t.Fatal("provider lifecycle does not approve every Test in the configured plan")
+	}
+	if !strings.Contains(source, `inputs="${SMOKE_INPUTS}"`) ||
+		!strings.Contains(source, `inputs="${RUN_INPUTS}"`) {
+		t.Fatal("provider lifecycle does not use the configured smoke and run inputs")
+	}
 }
 
 func TestProviderCertificationBindingsUseConfiguredContext(t *testing.T) {
@@ -401,7 +482,7 @@ func TestProviderCertificationBindingsUseConfiguredContext(t *testing.T) {
 		t.Fatal("Signal bindings invocation not found")
 	}
 
-	bindingsEnd := strings.Index(string(script)[bindingsStart:], `--filename "${plan}"`)
+	bindingsEnd := strings.Index(string(script)[bindingsStart:], `--filename "${PLAN}"`)
 	if bindingsEnd == -1 {
 		t.Fatal("Signal bindings filename argument not found")
 	}
@@ -646,7 +727,7 @@ func TestProviderCertificationUninstallStopsCampaignsBeforeRuns(t *testing.T) {
 	uninstall := source[uninstallStart : uninstallStart+uninstallEnd]
 	deleteCampaigns := strings.Index(
 		uninstall,
-		`delete_all_signal_resources certificationcampaigns "${namespace}"`,
+		`kube_delete_all_if_registered certificationcampaigns "${namespace}"`,
 	)
 	cancelRuns := strings.Index(uninstall, "cancel_and_release_runs")
 	if deleteCampaigns == -1 || cancelRuns == -1 {
@@ -669,7 +750,52 @@ func TestProviderCertificationUninstallStopsCampaignsBeforeRuns(t *testing.T) {
 	}
 }
 
-func TestProviderCertificationDeleteAllSignalResourcesSkipsMissingCRDs(t *testing.T) {
+func TestProviderCertificationUninstallToleratesMissingSignalCRDs(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(script)
+	for _, resource := range []string{
+		"certificationcampaignpolicies",
+		"certificationcampaigns",
+		"certificationprofiles",
+		"certificationsuites",
+		"certificationtests",
+		"certificationpolicies",
+	} {
+		if !strings.Contains(source, "kube_delete_all_if_registered "+resource) {
+			t.Fatalf("uninstall deletes %s without checking that its CRD is registered", resource)
+		}
+	}
+	if strings.Contains(source, `kube_delete_file "${manifest}"`) {
+		t.Fatal("uninstall retries generated manifests that may reference removed CRDs")
+	}
+
+	helperStart := strings.Index(source, "kube_delete_all_if_registered() {")
+	if helperStart == -1 {
+		t.Fatal("registered-resource deletion helper not found")
+	}
+
+	helperEnd := strings.Index(source[helperStart:], "\n}\n")
+	if helperEnd == -1 {
+		t.Fatal("registered-resource deletion helper end not found")
+	}
+
+	helper := source[helperStart : helperStart+helperEnd]
+	if !strings.Contains(helper, `kube_has_resource "${resource}" || return 0`) {
+		t.Fatal("registered-resource deletion helper does not tolerate a missing CRD")
+	}
+}
+
+func TestProviderCertificationRegisteredResourceDeletion(t *testing.T) {
 	t.Parallel()
 
 	repoRoot, err := filepath.Abs("../..")
@@ -677,79 +803,107 @@ func TestProviderCertificationDeleteAllSignalResourcesSkipsMissingCRDs(t *testin
 		t.Fatal(err)
 	}
 
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "kubectl.log")
-	writeExecutable(t, filepath.Join(binDir, "kubectl"), `#!/usr/bin/env bash
-printf '%s\n' "$*" >>"${MOCK_KUBECTL_LOG}"
-	if [[ "$*" == *"get customresourcedefinition"* ]]; then
-	  if [[ "${MOCK_DISCOVERY_FAILURE:-false}" == "true" ]]; then
-	    printf 'discovery failed\n' >&2
-	    exit 42
-	  fi
-	  if [[ "${MOCK_RESOURCE_REGISTERED:-false}" == "true" ]]; then
-	    printf 'customresourcedefinition.apiextensions.k8s.io/certificationcampaignpolicies.signal.unbounded-cloud.io\n'
-	  fi
-fi
-`)
-
 	script := filepath.Join(
 		repoRoot,
 		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
 	)
-	runDelete := func(registered, discoveryFailure bool) (string, string, error) {
-		t.Helper()
+	for _, test := range []struct {
+		name        string
+		mode        string
+		wantDelete  bool
+		wantFailure string
+	}{
+		{
+			name:       "registered",
+			mode:       "registered",
+			wantDelete: true,
+		},
+		{
+			name: "missing",
+			mode: "missing",
+		},
+		{
+			name:        "discovery failure",
+			mode:        "failure",
+			wantFailure: "could not discover registered Project Signal resources",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 
-		if err := os.WriteFile(logPath, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+			tempDir := t.TempDir()
+			binDir := filepath.Join(tempDir, "bin")
+			if err := os.MkdirAll(binDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
 
-		command := exec.Command(
-			"bash",
-			"-c",
-			`source "$1"; CONTEXT=test-context; REMOTE_HOST=""; delete_all_signal_resources certificationcampaignpolicies`,
-			"bash",
-			script,
-		)
-		command.Dir = repoRoot
-		command.Env = append(
-			os.Environ(),
-			"PROJECT_SIGNAL_LIB_ONLY=true",
-			"PATH="+binDir+":"+os.Getenv("PATH"),
-			"MOCK_KUBECTL_LOG="+logPath,
-			fmt.Sprintf("MOCK_RESOURCE_REGISTERED=%t", registered),
-			fmt.Sprintf("MOCK_DISCOVERY_FAILURE=%t", discoveryFailure),
-		)
+			logPath := filepath.Join(tempDir, "kubectl.log")
+			writeExecutable(t, filepath.Join(binDir, "kubectl"), `#!/usr/bin/env bash
+set -euo pipefail
 
-		output, err := command.CombinedOutput()
-		log, readErr := os.ReadFile(logPath)
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
+case "$*" in
+  *" api-resources --api-group=signal.unbounded-cloud.io -o name")
+    case "${MOCK_MODE}" in
+      registered)
+        printf 'certificationcampaigns.signal.unbounded-cloud.io\n'
+        ;;
+      missing)
+        ;;
+      failure)
+        exit 1
+        ;;
+    esac
+    ;;
+  *" delete certificationcampaigns --all --ignore-not-found")
+    printf 'delete\n' >>"${MOCK_LOG}"
+    ;;
+  *)
+    printf 'unexpected kubectl invocation: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+`)
 
-		return string(log), string(output), err
-	}
+			command := exec.Command(
+				"bash",
+				"-c",
+				`source "$1"; CONTEXT=test-context; REMOTE_HOST=""; kube_delete_all_if_registered certificationcampaigns`,
+				"bash",
+				script,
+			)
+			command.Dir = repoRoot
+			command.Env = append(
+				os.Environ(),
+				"PROJECT_SIGNAL_LIB_ONLY=true",
+				"MOCK_LOG="+logPath,
+				"MOCK_MODE="+test.mode,
+				"PATH="+binDir+":"+os.Getenv("PATH"),
+			)
 
-	log, output, err := runDelete(false, false)
-	if err != nil {
-		t.Fatalf("missing Signal CRD: %v\n%s", err, output)
-	}
-	if strings.Contains(log, " delete ") {
-		t.Fatalf("missing Signal CRD still triggered a delete:\n%s", log)
-	}
+			output, err := command.CombinedOutput()
+			if test.wantFailure != "" {
+				if err == nil {
+					t.Fatalf("resource discovery unexpectedly succeeded:\n%s", output)
+				}
+				if !strings.Contains(string(output), test.wantFailure) {
+					t.Fatalf("resource discovery failure is unclear:\n%s", output)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("registered-resource deletion failed: %v\n%s", err, output)
+			}
 
-	log, output, err = runDelete(true, false)
-	if err != nil {
-		t.Fatalf("registered Signal CRD: %v\n%s", err, output)
-	}
-	if !strings.Contains(
-		log,
-		"delete certificationcampaignpolicies --all --ignore-not-found",
-	) {
-		t.Fatalf("registered Signal CRD was not deleted:\n%s", log)
-	}
-
-	if _, output, err = runDelete(false, true); err == nil {
-		t.Fatalf("CRD discovery failure was silently treated as an absent resource:\n%s", output)
+			log, readErr := os.ReadFile(logPath)
+			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatal(readErr)
+			}
+			deleted := strings.Contains(string(log), "delete")
+			if deleted != test.wantDelete {
+				t.Fatalf("delete called = %t, want %t", deleted, test.wantDelete)
+			}
+		})
 	}
 }
 
