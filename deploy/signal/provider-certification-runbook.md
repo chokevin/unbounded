@@ -84,7 +84,7 @@ Replace every placeholder.
 | `spec.context` | Exact kubeconfig context | `kubectl --context <context> cluster-info` succeeds |
 | `spec.cluster` | Stable identity used as the central `cluster` metric label | Must not be `cluster` or `default`; must exactly match the metrics overlay |
 | `spec.environment` | Bounded environment classification | Must not contain a placeholder |
-| `spec.sourceCommit` | Full 40-character controller and adapter source commit | Must identify the immutable images; it does not need to equal the lifecycle checkout HEAD |
+| `spec.sourceCommit` | Full 40-character controller and adapter source commit | Must identify the immutable images; install verifies the controller startup version before creating authority, and it does not need to equal the lifecycle checkout HEAD |
 | `spec.nodeSelector` | Smallest labels selecting all intended Nodes and no others | Review `kubectl get nodes -l '<selector>'` |
 | `spec.providerLabel` | Canonical provider label | Must remain `unbounded-cloud.io/site` |
 | `spec.expectedGPUCount` | GPUs per selected worker | Must remain `8` |
@@ -152,7 +152,7 @@ Do not continue until preflight passes. Correct the cluster or configuration;
 do not weaken the host-native, eight-GPU, free-capacity, image, or metrics
 requirements to get past the gate.
 
-Common preflight failures:
+Common preflight and install failures:
 
 | Failure | Required correction |
 |---|---|
@@ -165,6 +165,7 @@ Common preflight failures:
 | Unbounded Machine API is absent | Install and verify Unbounded before Project Signal |
 | Plan, inputs, or overlay still have placeholders | Complete the user-owned certification workspace |
 | Source checkout is dirty | Commit or remove source changes before mutating actions |
+| Controller image source commit differs from config | Use the exact full commit embedded by the pinned controller image |
 
 Read-only `status` does not require a clean checkout. Mutating actions do.
 

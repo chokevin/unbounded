@@ -465,6 +465,71 @@ func TestProviderCertificationUsesConfiguredCertificationPlan(t *testing.T) {
 	}
 }
 
+func TestProviderCertificationVerifiesControllerSourceCommit(t *testing.T) {
+	t.Parallel()
+
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	script := filepath.Join(
+		repoRoot,
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	)
+	expected := strings.Repeat("a", 40)
+
+	command := exec.Command(
+		"bash",
+		"-c",
+		`PROJECT_SIGNAL_LIB_ONLY=true source "$1"; verify_controller_source_commit_value "$2" "$3"`,
+		"provider-provenance-test",
+		script,
+		expected,
+		`dev-aaaaaaaaaaaa (commit: `+expected+`, built: 2026-11-19T23:18:09Z)`,
+	)
+	command.Dir = repoRoot
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("verify matching controller source commit: %v\n%s", err, output)
+	}
+
+	command = exec.Command(
+		"bash",
+		"-c",
+		`PROJECT_SIGNAL_LIB_ONLY=true source "$1"; verify_controller_source_commit_value "$2" "$3"`,
+		"provider-provenance-test",
+		script,
+		expected,
+		`dev-bbbbbbbbbbbb (commit: `+strings.Repeat("b", 40)+`, built: 2026-11-19T23:18:09Z)`,
+	)
+	command.Dir = repoRoot
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("source commit mismatch was accepted:\n%s", output)
+	}
+	if !strings.Contains(string(output), "does not match spec.sourceCommit") {
+		t.Fatalf("source commit mismatch does not explain the authoritative values:\n%s", output)
+	}
+
+	command = exec.Command(
+		"bash",
+		"-c",
+		`PROJECT_SIGNAL_LIB_ONLY=true source "$1"; verify_controller_source_commit_value "$2" "$3"`,
+		"provider-provenance-test",
+		script,
+		expected,
+		"dev-without-provenance",
+	)
+	command.Dir = repoRoot
+	output, err = command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("controller version without an exact commit was accepted:\n%s", output)
+	}
+	if !strings.Contains(string(output), "did not report an exact source commit") {
+		t.Fatalf("missing controller source commit failure is unclear:\n%s", output)
+	}
+}
+
 func TestProviderCertificationBindingsUseConfiguredContext(t *testing.T) {
 	t.Parallel()
 

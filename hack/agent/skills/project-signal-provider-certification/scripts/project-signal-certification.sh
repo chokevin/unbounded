@@ -592,6 +592,35 @@ install_signal_runtime() {
     deployment/project-signal-controller --timeout=10m
 }
 
+verify_controller_source_commit_value() {
+  local expected="$1"
+  local version="$2"
+  local actual
+
+  actual="$(
+    printf '%s\n' "${version}" |
+      grep -oE '[0-9a-f]{40}' |
+      tail -1 || true
+  )"
+  [[ -n "${actual}" ]] ||
+    fail "controller image did not report an exact source commit"
+  [[ "${actual}" == "${expected}" ]] ||
+    fail "controller image source commit ${actual} does not match spec.sourceCommit ${expected}"
+}
+
+verify_controller_source_commit() {
+  local version
+
+  version="$(
+    kube -n "${namespace}" logs deployment/project-signal-controller \
+      --since=10m --tail=200 |
+      jq -r \
+        'select(.msg == "starting Project Signal controller") | .version // empty' |
+      tail -1
+  )"
+  verify_controller_source_commit_value "${SOURCE_COMMIT}" "${version}"
+}
+
 approve_test_manifest() {
   local manifest="$1"
   local name="$2"
@@ -857,6 +886,7 @@ install_all() {
   preflight
   install_argo
   install_signal_runtime
+  verify_controller_source_commit
   install_execution_authority
   install_catalog
   install_metrics
