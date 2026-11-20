@@ -219,6 +219,26 @@ func TestProviderCertificationBindingsUseConfiguredContext(t *testing.T) {
 	}
 }
 
+func TestProviderCertificationAllowsIntentionalRemoteWriteFiltering(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(string(script), "prometheus_remote_storage_samples_dropped_total") {
+		t.Fatal("remote-write validation rejects samples intentionally filtered by write relabeling")
+	}
+	if !strings.Contains(string(script), "prometheus_remote_storage_samples_failed_total") {
+		t.Fatal("remote-write validation no longer checks non-recoverable failures")
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 

@@ -623,12 +623,9 @@ value="$(query 'sum(prometheus_remote_storage_samples_total)' |
   jq -r '.data.result[0].value[1] // "0"')"
 awk -v value="${value}" 'BEGIN { exit !(value > 0) }'
 
-for metric in \
-  prometheus_remote_storage_samples_failed_total \
-  prometheus_remote_storage_samples_dropped_total; do
-  value="$(query "sum(${metric})" | jq -r '.data.result[0].value[1] // "0"')"
-  awk -v value="${value}" 'BEGIN { exit !(value == 0) }'
-done
+value="$(query 'sum(prometheus_remote_storage_samples_failed_total)' |
+  jq -r '.data.result[0].value[1] // "0"')"
+awk -v value="${value}" 'BEGIN { exit !(value == 0) }'
 
 value="$(query 'sum(up{job="project-signal-controller"} == 1)' |
   jq -r '.data.result[0].value[1] // "0"')"
@@ -675,14 +672,10 @@ validate_metrics() {
   awk -v value="${value}" 'BEGIN { exit !(value > 0) }' ||
     fail "remote-write has not sent any samples"
 
-  for metric in \
-    prometheus_remote_storage_samples_failed_total \
-    prometheus_remote_storage_samples_dropped_total; do
-    response="$(prometheus_query "sum(${metric})")"
-    value="$(jq -r '.data.result[0].value[1] // "0"' <<<"${response}")"
-    awk -v value="${value}" 'BEGIN { exit !(value == 0) }' ||
-      fail "${metric} is ${value}, expected 0"
-  done
+  response="$(prometheus_query 'sum(prometheus_remote_storage_samples_failed_total)')"
+  value="$(jq -r '.data.result[0].value[1] // "0"' <<<"${response}")"
+  awk -v value="${value}" 'BEGIN { exit !(value == 0) }' ||
+    fail "prometheus_remote_storage_samples_failed_total is ${value}, expected 0"
 
   response="$(prometheus_query 'sum(up{job="project-signal-controller"} == 1)')"
   value="$(jq -r '.data.result[0].value[1] // "0"' <<<"${response}")"

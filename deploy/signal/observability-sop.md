@@ -200,7 +200,9 @@ Verify central transport health using the transport implementation's sent,
 failed, retried, pending, and dropped sample metrics. Require:
 
 - successful samples are increasing;
-- failed and dropped samples are zero during the validation window;
+- non-recoverable failed samples are zero during the validation window;
+- dropped samples are interpreted with the configured write relabeling because
+  intentional filtering increments the same counter;
 - pending samples return to zero; and
 - the standard external labels are present.
 
@@ -222,7 +224,8 @@ A certification cluster is observability-ready only when all of these are true:
 
 - Signal controller and local Prometheus rollouts are healthy.
 - Local controller scrape health is `1`.
-- Central transport has no failed or dropped samples.
+- Central transport has no non-recoverable failed samples, and every required
+  controller and provider-attributed GPU series is present.
 - Central queries return the configured cluster identity and Signal source
   commit.
 - The approved dashboard revision renders node, Run, stage, campaign, and
