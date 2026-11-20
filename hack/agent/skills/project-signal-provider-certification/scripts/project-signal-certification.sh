@@ -559,6 +559,7 @@ install_catalog() {
   (
     cd "${repo_root}"
     go run ./cmd/kubectl-unbounded signal bindings \
+      --context "${CONTEXT}" \
       --filename "${plan}" >"${bindings}"
   )
 }

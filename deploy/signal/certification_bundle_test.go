@@ -191,6 +191,34 @@ spec:
 	}
 }
 
+func TestProviderCertificationBindingsUseConfiguredContext(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bindingsStart := strings.Index(string(script), "go run ./cmd/kubectl-unbounded signal bindings")
+	if bindingsStart == -1 {
+		t.Fatal("Signal bindings invocation not found")
+	}
+
+	bindingsEnd := strings.Index(string(script)[bindingsStart:], `--filename "${plan}"`)
+	if bindingsEnd == -1 {
+		t.Fatal("Signal bindings filename argument not found")
+	}
+
+	invocation := string(script)[bindingsStart : bindingsStart+bindingsEnd]
+	if !strings.Contains(invocation, `--context "${CONTEXT}"`) {
+		t.Fatal("Signal bindings can silently use the kubeconfig current context")
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 
