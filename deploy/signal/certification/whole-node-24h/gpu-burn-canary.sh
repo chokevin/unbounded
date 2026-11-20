@@ -50,6 +50,47 @@ xid_count() {
   grep -Eic 'NVRM: Xid|Xid \(' <<< "${messages}" || true
 }
 
+write_qualification_fingerprint() {
+  local driver_versions driver_version inventory_digest
+
+  if ! driver_versions="$(
+    nvidia-smi --query-gpu=driver_version --format=csv,noheader,nounits |
+      sort -u
+  )" ||
+    [[ "$(wc -l <<<"${driver_versions}")" -ne 1 ]]; then
+    fail QualificationFingerprintUnavailable "GPU driver versions are unavailable or inconsistent"
+
+    return 1
+  fi
+  driver_version="$(trim "${driver_versions}")"
+  inventory_digest="sha256:$(sha256sum /results/devices.txt | awk '{print $1}')"
+
+  if ! python3 - "${driver_version}" "${inventory_digest}" "${EXPECTED_GPU_COUNT}" \
+    > /results/qualification.json <<'PY'
+import json
+import sys
+
+driver_version, inventory_digest, gpu_count = sys.argv[1:]
+devices = [f"gpu-index-{index}" for index in range(int(gpu_count))]
+json.dump(
+    {
+        "driverVersion": driver_version,
+        "gpuInventoryDigest": inventory_digest,
+        "visibleDevices": devices,
+        "coveredDevices": devices,
+    },
+    sys.stdout,
+    sort_keys=True,
+    separators=(",", ":"),
+)
+PY
+  then
+    fail QualificationFingerprintUnavailable "Cannot write the qualification fingerprint"
+
+    return 1
+  fi
+}
+
 capture_telemetry() {
   local mode="$1"
   local rows row index product temperature margin power_draw power_limit power_limit_threshold
@@ -436,9 +477,13 @@ else
     fail XidTelemetryUnavailable "Cannot capture baseline kernel Xid telemetry"
   fi
   capture_telemetry baseline || true
-  if [[ "${component}" == gpu-burn ]] &&
-     ! nvidia-smi --query-gpu=index,uuid,pci.bus_id,name --format=csv,noheader > /results/devices.txt; then
-    fail DeviceIdentityUnavailable "Cannot retain assigned GPU identities"
+  if [[ "${component}" == gpu-burn ]]; then
+    if ! nvidia-smi --query-gpu=index,uuid,pci.bus_id,name \
+      --format=csv,noheader > /results/devices.txt; then
+      fail DeviceIdentityUnavailable "Cannot retain assigned GPU identities"
+    elif ! write_qualification_fingerprint; then
+      :
+    fi
   fi
 fi
 

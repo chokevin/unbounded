@@ -945,7 +945,8 @@ cancel_runs_for_policy() {
   done < <(
     jq -r --argjson campaigns "${campaigns}" '
       .items[] |
-      select($campaigns | index(.metadata.labels["signal.unbounded-cloud.io/campaign"])) |
+      . as $run |
+      select($campaigns | index($run.metadata.labels["signal.unbounded-cloud.io/campaign"])) |
       [.metadata.name, (.status.phase // "")] |
       @tsv
     ' <<<"${runs_json}"

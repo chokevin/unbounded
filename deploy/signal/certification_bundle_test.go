@@ -342,6 +342,30 @@ func TestProviderCertificationAppliesCompiledPackageToSignalNamespace(t *testing
 	}
 }
 
+func TestWholeNodeBurnProducesQualificationFingerprint(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"certification/whole-node-24h/gpu-burn-canary.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(script)
+	for _, required := range []string{
+		"--query-gpu=driver_version",
+		"gpuInventoryDigest",
+		"visibleDevices",
+		"coveredDevices",
+		"/results/qualification.json",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("qualification fingerprint is missing %q", required)
+		}
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 
