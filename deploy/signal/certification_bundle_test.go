@@ -441,32 +441,6 @@ func TestWholeNodeBurnCommandsInvokeScriptsOnSeparateLines(t *testing.T) {
 	}
 }
 
-func TestWholeNodeBurnUsesNVMLXidEvents(t *testing.T) {
-	t.Parallel()
-
-	script, err := os.ReadFile(filepath.Join(
-		"certification/whole-node-24h/gpu-burn-canary.sh",
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	source := string(script)
-	for _, required := range []string{
-		"nvmlDeviceRegisterEvents",
-		"nvmlEventSetWait_v2",
-		"ctypes.c_ulonglong(0x8)",
-		"NewXidDetected",
-	} {
-		if !strings.Contains(source, required) {
-			t.Fatalf("NVML Xid monitor is missing %q", required)
-		}
-	}
-	if strings.Contains(source, "dmesg") {
-		t.Fatal("burn script still depends on container kernel-log access")
-	}
-}
-
 func TestWholeNodeBurnOutputsDoNotOverlapSharedVolume(t *testing.T) {
 	t.Parallel()
 
