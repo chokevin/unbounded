@@ -655,12 +655,13 @@ func TestProviderCertificationUninstallStopsCampaignsBeforeRuns(t *testing.T) {
 	}
 
 	uninstallArgo := strings.Index(uninstall, "helm uninstall project-signal-argo")
+	deleteMetrics := strings.Index(uninstall, `kube_delete_file "${WORK_DIR}/metrics-overlay.yaml"`)
 	deleteRuntime := strings.Index(uninstall, `kube_delete_directory "${RENDERED_DIR}"`)
-	if uninstallArgo == -1 || deleteRuntime == -1 {
-		t.Fatal("uninstall Argo or runtime cleanup step not found")
+	if uninstallArgo == -1 || deleteMetrics == -1 || deleteRuntime == -1 {
+		t.Fatal("uninstall Argo, metrics, or runtime cleanup step not found")
 	}
 
-	if uninstallArgo > deleteRuntime {
+	if uninstallArgo > deleteMetrics || uninstallArgo > deleteRuntime {
 		t.Fatal("uninstall deletes Helm release metadata before uninstalling Argo")
 	}
 }
