@@ -169,7 +169,7 @@ load_config() {
   CONTEXT="$(jq -r '.spec.context // ""' "${CONFIG_JSON}")"
   CLUSTER="$(jq -r '.spec.cluster // ""' "${CONFIG_JSON}")"
   ENVIRONMENT="$(jq -r '.spec.environment // ""' "${CONFIG_JSON}")"
-  EXPECTED_NODES="$(jq -r '.spec.expectedNodeCount // 0' "${CONFIG_JSON}")"
+  EXPECTED_NODES=0
   EXPECTED_GPUS="$(jq -r '.spec.expectedGPUCount // 0' "${CONFIG_JSON}")"
   PROVIDER_LABEL="$(jq -r '.spec.providerLabel // ""' "${CONFIG_JSON}")"
   METRICS_OVERLAY="$(jq -r '.spec.metricsOverlay // ""' "${CONFIG_JSON}")"
@@ -226,8 +226,6 @@ preflight_config() {
   reject_placeholder "spec.metricsOverlay" "${METRICS_OVERLAY}"
   [[ "${CLUSTER}" != "cluster" && "${CLUSTER}" != "default" ]] ||
     fail "spec.cluster must be the actual cluster identifier"
-  [[ "${EXPECTED_NODES}" == "3" ]] ||
-    fail "spec.expectedNodeCount must be exactly 3"
   [[ "${EXPECTED_GPUS}" == "8" ]] ||
     fail "spec.expectedGPUCount must be exactly 8"
   [[ "${PROVIDER_LABEL}" == "unbounded-cloud.io/site" ]] ||
@@ -275,6 +273,9 @@ preflight_nodes() {
 
   local count
   count="$(jq '.items | length' "${nodes_json}")"
+  [[ "${count}" -gt 0 ]] ||
+    fail "selector ${SELECTOR} did not match any provider Nodes"
+  EXPECTED_NODES="${count}"
 
   local violations
   violations="$(
@@ -297,15 +298,9 @@ preflight_nodes() {
       "\(.metadata.name): ready=\($ready) unschedulable=\(.spec.unschedulable // false) provider=\($provider) capacity=\($capacity) allocatable=\($allocatable)"
       ' "${nodes_json}"
   )"
-  if [[ "${count}" != "${EXPECTED_NODES}" || -n "${violations}" ]]; then
+  if [[ -n "${violations}" ]]; then
     printf 'error: node preflight failed\n' >&2
-    if [[ "${count}" != "${EXPECTED_NODES}" ]]; then
-      printf 'selector %s matched %s Nodes, expected %s\n' \
-        "${SELECTOR}" "${count}" "${EXPECTED_NODES}" >&2
-    fi
-    if [[ -n "${violations}" ]]; then
-      printf '%s\n' "${violations}" >&2
-    fi
+    printf '%s\n' "${violations}" >&2
     exit 1
   fi
 }

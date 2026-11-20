@@ -1,11 +1,11 @@
 ---
 name: project-signal-provider-certification
-description: Install, validate, run, inspect, and remove a three-node Project Signal provider certification with centralized metrics.
+description: Install, validate, run, inspect, and remove a Project Signal provider certification with centralized metrics.
 ---
 
 ## Purpose
 
-Use this skill to turn a clean Kubernetes cluster with three labeled GPU Nodes
+Use this skill to turn a clean Kubernetes cluster with labeled GPU Nodes
 into a Project Signal certification environment. The repository owns the
 controllers, Argo runtime, 24-hour whole-node burn, DCGM exporter, and
 Prometheus base. The operator supplies one cluster config and one internal
@@ -13,14 +13,14 @@ Kustomize overlay for the remote-write endpoint and identity.
 
 The workflow is intentionally ordered:
 
-1. Preflight the exact context, three selected Nodes, GPU inventory, provider
+1. Preflight the exact context, all selected Nodes, GPU inventory, provider
    labels, immutable images, and metrics overlay.
 2. Install pinned Argo Workflows and Project Signal.
 3. Render, review, approve, bind, and install the repository-owned burn Test.
 4. Install one central Prometheus collector and DCGM exporter.
 5. Prove controller, GPU, and remote-write metrics are healthy.
-6. Run a short three-node smoke.
-7. Launch one 24-hour burn on each of the three Nodes.
+6. Run a short smoke on every selected Node.
+7. Launch one 24-hour burn on every selected Node.
 
 ## Configuration boundary
 
@@ -32,7 +32,7 @@ Public configuration includes:
 
 - kubeconfig context;
 - actual cluster identifier used as the `cluster` metrics label;
-- exact three-node selector;
+- provider Node selector;
 - canonical provider label key;
 - expected GPU count and product;
 - bounded CPU, memory, storage, and sampling settings;
@@ -62,10 +62,10 @@ config=/secure/path/provider-certification.yaml
 # Idempotent controller, catalog, and metrics installation.
 "$skill" install "$config"
 
-# Two-minute burn on all three Nodes, then require three passing Runs.
+# Two-minute burn on every selected Node, then require every Run to pass.
 "$skill" smoke "$config"
 
-# Launch one 24-hour burn on all three Nodes.
+# Launch one 24-hour burn on every selected Node.
 "$skill" run "$config"
 
 # Install, smoke, and launch the 24-hour run in one command.
@@ -78,10 +78,12 @@ config=/secure/path/provider-certification.yaml
 "$skill" uninstall "$config"
 ```
 
-`start` is the normal clean-cluster path. It stops before the 24-hour launch if
-the smoke fails, the selected Node count changes, a provider label is missing,
-the cluster label is generic or mismatched, or remote-write reports failed or
-dropped samples.
+`start` is the normal clean-cluster path. Each phase discovers the complete
+Node population matching the provider selector. It stops before the 24-hour
+launch if any selected Node is unhealthy, unschedulable, missing its provider
+label, or does not expose the expected GPU inventory; if the smoke fails; if
+the cluster label is generic or mismatched; or if remote-write reports failed
+or dropped samples.
 
 ## Trust decision
 

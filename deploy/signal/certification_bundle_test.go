@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -59,6 +60,142 @@ func TestWholeNodeCertificationBundle(t *testing.T) {
 
 	materializer := workflowMaterializerCommand(t, workflow)
 	testMaterializer(t, materializer)
+}
+
+func TestProviderCertificationPreflightDiscoversSelectedNodes(t *testing.T) {
+	t.Parallel()
+
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tempDir := t.TempDir()
+	binDir := filepath.Join(tempDir, "bin")
+	metricsDir := filepath.Join(tempDir, "metrics")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(metricsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metricsDir, "kustomization.yaml"), []byte(
+		"apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n",
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	writeExecutable(t, filepath.Join(binDir, "git"), `#!/usr/bin/env bash
+exit 0
+`)
+	writeExecutable(t, filepath.Join(binDir, "kubectl"), `#!/usr/bin/env bash
+set -euo pipefail
+
+case "$*" in
+  *"config current-context")
+    printf 'test-context\n'
+    ;;
+  *" version --request-timeout=15s")
+    printf 'ok\n'
+    ;;
+  *" get nodes "*)
+    if [[ "${MOCK_NODE_COUNT:-2}" == "0" ]]; then
+      printf '{"items":[]}\n'
+      exit
+    fi
+    cat <<'EOF'
+{"items":[
+  {"metadata":{"name":"provider-node-a","labels":{"unbounded-cloud.io/site":"provider-a"}},"spec":{"unschedulable":false},"status":{"conditions":[{"type":"Ready","status":"True"}],"capacity":{"nvidia.com/gpu":"8"},"allocatable":{"nvidia.com/gpu":"8"}}},
+  {"metadata":{"name":"provider-node-b","labels":{"unbounded-cloud.io/site":"provider-a"}},"spec":{"unschedulable":false},"status":{"conditions":[{"type":"Ready","status":"True"}],"capacity":{"nvidia.com/gpu":"8"},"allocatable":{"nvidia.com/gpu":"8"}}}
+]}
+EOF
+    ;;
+  kustomize*)
+    cat <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: project-signal-central-prometheus
+data:
+  prometheus.yml: |
+    global:
+      external_labels:
+        cluster: test-cluster
+    scrape_configs:
+      - job_name: test
+        metric_relabel_configs:
+          - target_label: unbounded_cloud_io_site
+    remote_write:
+      - url: https://metrics.example.invalid
+EOF
+    ;;
+  *)
+    printf 'unexpected kubectl invocation: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+`)
+
+	configPath := filepath.Join(tempDir, "config.yaml")
+	config := fmt.Sprintf(`apiVersion: signal.unbounded-cloud.io/v1alpha1
+kind: CertificationDeployment
+metadata:
+  name: dynamic-provider-test
+spec:
+  context: test-context
+  cluster: test-cluster
+  environment: certification
+  nodeSelector:
+    unbounded-cloud.io/site: provider-a
+  providerLabel: unbounded-cloud.io/site
+  expectedGPUCount: 8
+  expectedGPUProductRegex: "^NVIDIA B200$"
+  metricsOverlay: %s
+  images:
+    controller: example.invalid/controller@sha256:%s
+    adapter: example.invalid/adapter@sha256:%s
+`, metricsDir, strings.Repeat("a", 64), strings.Repeat("b", 64))
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	script := filepath.Join(
+		repoRoot,
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	)
+	command := exec.Command(script, "preflight", configPath)
+	command.Dir = repoRoot
+	command.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("preflight two discovered Nodes: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "nodes=2") {
+		t.Fatalf("preflight output does not report discovered Nodes:\n%s", output)
+	}
+
+	command = exec.Command(script, "preflight", configPath)
+	command.Dir = repoRoot
+	command.Env = append(
+		os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"MOCK_NODE_COUNT=0",
+	)
+	output, err = command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("preflight unexpectedly accepted an empty provider selector:\n%s", output)
+	}
+	if !strings.Contains(string(output), "did not match any provider Nodes") {
+		t.Fatalf("empty-selector failure is unclear:\n%s", output)
+	}
+}
+
+func writeExecutable(t *testing.T, path string, content string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func decodeCertificationBundle(t *testing.T, rendered []byte) []unstructured.Unstructured {

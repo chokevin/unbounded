@@ -135,7 +135,7 @@ covered device labels remain redacted as `gpu-index-N`; missing, mixed,
 malformed, duplicate, gapped, partial, or changed identity evidence fails
 closed.
 
-## Three-node provider certification
+## Provider certification
 
 The repository includes a reproducible 24-hour whole-node certification bundle
 under `deploy/signal/certification/whole-node-24h/`. It embeds the reviewed burn
@@ -144,10 +144,12 @@ and does not depend on a pre-created script ConfigMap.
 
 Use the
 `hack/agent/skills/project-signal-provider-certification/` skill for the
-clean-cluster workflow. It preflights exactly three eight-GPU Nodes, installs
-the pinned Argo and Signal runtimes, records trust for the exact rendered Test
-digest, installs the central metrics overlay, requires healthy remote-write,
-runs a two-minute smoke, and then launches one 24-hour burn per Node.
+clean-cluster workflow. It discovers every Node matching the provider selector,
+requires each selected Node to be Ready, schedulable, and expose eight GPUs,
+installs the pinned Argo and Signal runtimes, records trust for the exact
+rendered Test digest, installs the central metrics overlay, requires healthy
+remote-write, runs a two-minute smoke, and then launches one 24-hour burn per
+Node.
 
 The public repository owns the controllers, burn contract, DCGM exporter,
 Prometheus base, label semantics, and validation gates. The organization-owned

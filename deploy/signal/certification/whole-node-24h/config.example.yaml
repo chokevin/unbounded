@@ -1,12 +1,11 @@
 apiVersion: signal.unbounded-cloud.io/v1alpha1
 kind: CertificationDeployment
 metadata:
-  name: three-node-24h
+  name: provider-24h
 spec:
   context: replace-with-kube-context
   cluster: replace-with-actual-cluster-identifier
   environment: certification
-  expectedNodeCount: 3
   nodeSelector:
     unbounded-cloud.io/site: replace-with-provider-identifier
   providerLabel: unbounded-cloud.io/site
