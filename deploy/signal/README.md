@@ -153,6 +153,11 @@ runtimes, records trust for the exact rendered Test digest, installs the
 central metrics overlay, requires healthy remote-write, runs a two-minute
 smoke, and then launches one 24-hour burn per Node.
 
+Operators who are new to Signal should follow the
+[provider certification runbook](provider-certification-runbook.md). It
+documents every configuration field, jumpbox behavior, metrics ownership,
+preflight correction, monitoring gate, teardown check, and clean-room retry.
+
 The public repository owns the controllers, burn contract, DCGM exporter,
 Prometheus base, label semantics, and validation gates. The organization-owned
 Kustomize overlay owns internal remote-write endpoints, identities, Secret

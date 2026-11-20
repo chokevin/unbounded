@@ -11,6 +11,10 @@ controllers, Argo runtime, 24-hour whole-node burn, DCGM exporter, and
 Prometheus base. The operator supplies one cluster config and one internal
 Kustomize overlay for the remote-write endpoint and identity.
 
+For the complete operator-facing field reference, prerequisites,
+troubleshooting, monitoring gate, and clean-room retry, follow
+`deploy/signal/provider-certification-runbook.md`.
+
 The workflow is intentionally ordered:
 
 1. Preflight the exact context, all selected Nodes, GPU inventory, provider

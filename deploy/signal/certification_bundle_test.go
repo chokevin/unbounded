@@ -128,6 +128,47 @@ func TestProviderCertificationInitCreatesPortableWorkspace(t *testing.T) {
 	}
 }
 
+func TestProviderCertificationRunbookDocumentsCompleteLifecycle(t *testing.T) {
+	t.Parallel()
+
+	runbook, err := os.ReadFile("provider-certification-runbook.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	required := []string{
+		"spec.context",
+		"spec.cluster",
+		"spec.environment",
+		"spec.sourceCommit",
+		"spec.nodeSelector",
+		"spec.providerLabel",
+		"spec.expectedGPUCount",
+		"spec.expectedGPUProductRegex",
+		"spec.cpuWorkers",
+		"spec.memoryMiB",
+		"spec.storageMiB",
+		"spec.sampleIntervalSeconds",
+		"spec.metricsOverlay",
+		"spec.execution.ssh",
+		"spec.images.controller",
+		"spec.images.adapter",
+		"ACTION=preflight",
+		"ACTION=start",
+		"ACTION=status",
+		"ACTION=uninstall",
+		"status.isolation: none",
+		"remote-write",
+		"Grafana",
+		"clean-room retry",
+	}
+	for _, value := range required {
+		if !strings.Contains(string(runbook), value) {
+			t.Errorf("provider certification runbook does not document %q", value)
+		}
+	}
+}
+
 func TestProviderCertificationPreflightDiscoversSelectedNodes(t *testing.T) {
 	t.Parallel()
 
