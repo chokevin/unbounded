@@ -336,7 +336,7 @@ spec:
         \ qualification JSON\") from error\n    if not isinstance(value, dict) or\
         \ set(value) != {\n        \"driverVersion\",\n        \"gpuInventoryDigest\"\
         ,\n        \"visibleDevices\",\n        \"coveredDevices\",\n    }:\n    \
-        \    raise SystemExit(\"invalid qualification fingerprint\")\n    driver =\
+        \    raise SystemExit(\"invalid qualification fingerprint keys\")\n    driver =\
         \ value[\"driverVersion\"]\n    digest = value[\"gpuInventoryDigest\"]\n \
         \   visible = value[\"visibleDevices\"]\n    covered = value[\"coveredDevices\"\
         ]\n    if (\n        not isinstance(driver, str)\n        or not 1 <= len(driver.encode())\
@@ -345,7 +345,7 @@ spec:
         , digest)\n        or not isinstance(visible, list)\n        or not isinstance(covered,\
         \ list)\n        or not visible\n        or visible != covered\n        or\
         \ visible != [\"gpu-index-\" + str(index) for index in range(len(visible))]\n\
-        \    ):\n        raise SystemExit(\"invalid qualification fingerprint\")\n\
+        \    ):\n        raise SystemExit(\"invalid qualification fingerprint values\")\n\
         \    return value\n\nverdicts = load_encoded_list(\"RESULT_VERDICTS_JSON\"\
         )\nreasons = load_encoded_list(\"RESULT_REASONS_JSON\")\nexit_codes = [int(value)\
         \ for value in load_encoded_list(\"RESULT_EXIT_CODES_JSON\")]\nbackend_statuses\
