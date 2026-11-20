@@ -1073,4 +1073,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${PROJECT_SIGNAL_LIB_ONLY:-false}" != "true" ]]; then
+  main "$@"
+fi
