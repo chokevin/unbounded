@@ -169,6 +169,7 @@ load_config() {
   CONTEXT="$(jq -r '.spec.context // ""' "${CONFIG_JSON}")"
   CLUSTER="$(jq -r '.spec.cluster // ""' "${CONFIG_JSON}")"
   ENVIRONMENT="$(jq -r '.spec.environment // ""' "${CONFIG_JSON}")"
+  SOURCE_COMMIT="$(jq -r '.spec.sourceCommit // ""' "${CONFIG_JSON}")"
   EXPECTED_NODES=0
   EXPECTED_GPUS="$(jq -r '.spec.expectedGPUCount // 0' "${CONFIG_JSON}")"
   PROVIDER_LABEL="$(jq -r '.spec.providerLabel // ""' "${CONFIG_JSON}")"
@@ -223,11 +224,14 @@ preflight_config() {
   reject_placeholder "spec.context" "${CONTEXT}"
   reject_placeholder "spec.cluster" "${CLUSTER}"
   reject_placeholder "spec.environment" "${ENVIRONMENT}"
+  reject_placeholder "spec.sourceCommit" "${SOURCE_COMMIT}"
   reject_placeholder "spec.metricsOverlay" "${METRICS_OVERLAY}"
   [[ "${CLUSTER}" != "cluster" && "${CLUSTER}" != "default" ]] ||
     fail "spec.cluster must be the actual cluster identifier"
   [[ "${EXPECTED_GPUS}" == "8" ]] ||
     fail "spec.expectedGPUCount must be exactly 8"
+  [[ "${SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "spec.sourceCommit must be the exact 40-character controller image commit"
   [[ "${PROVIDER_LABEL}" == "unbounded-cloud.io/site" ]] ||
     fail "spec.providerLabel must be unbounded-cloud.io/site"
   [[ -n "${SELECTOR}" ]] || fail "spec.nodeSelector must not be empty"
@@ -371,7 +375,7 @@ render_signal_phase() {
   if [[ "${phase}" == "authority" ]]; then
     authority_enabled=true
     hard_abort=false
-    source_commit="$(git -C "${repo_root}" rev-parse HEAD)"
+    source_commit="${SOURCE_COMMIT}"
     static_package_digest="$(cat "${WORK_DIR}/static-package-digest")"
     baseline_profile_uid="$(jq -r '.uid' "${WORK_DIR}/baseline-profile.json")"
     authority_name="project-signal-execution-authority-${source_commit:0:12}-${static_package_digest#sha256:}"

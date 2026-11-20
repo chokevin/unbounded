@@ -32,6 +32,7 @@ Public configuration includes:
 
 - kubeconfig context;
 - actual cluster identifier used as the `cluster` metrics label;
+- exact source commit embedded in the controller and adapter images;
 - provider Node selector;
 - canonical provider label key;
 - expected GPU count and product;

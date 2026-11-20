@@ -6,6 +6,7 @@ spec:
   context: replace-with-kube-context
   cluster: replace-with-actual-cluster-identifier
   environment: certification
+  sourceCommit: replace-with-controller-image-source-commit
   nodeSelector:
     unbounded-cloud.io/site: replace-with-provider-identifier
   providerLabel: unbounded-cloud.io/site

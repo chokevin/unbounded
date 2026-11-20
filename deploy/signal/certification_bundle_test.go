@@ -146,6 +146,7 @@ spec:
   context: test-context
   cluster: test-cluster
   environment: certification
+  sourceCommit: %s
   nodeSelector:
     unbounded-cloud.io/site: provider-a
   providerLabel: unbounded-cloud.io/site
@@ -155,7 +156,7 @@ spec:
   images:
     controller: example.invalid/controller@sha256:%s
     adapter: example.invalid/adapter@sha256:%s
-`, metricsDir, strings.Repeat("a", 64), strings.Repeat("b", 64))
+`, strings.Repeat("c", 40), metricsDir, strings.Repeat("a", 64), strings.Repeat("b", 64))
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +237,36 @@ func TestProviderCertificationAllowsIntentionalRemoteWriteFiltering(t *testing.T
 	}
 	if !strings.Contains(string(script), "prometheus_remote_storage_samples_failed_total") {
 		t.Fatal("remote-write validation no longer checks non-recoverable failures")
+	}
+}
+
+func TestProviderCertificationAuthorityUsesImageSourceCommit(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	authorityStart := strings.Index(string(script), `if [[ "${phase}" == "authority" ]]`)
+	if authorityStart == -1 {
+		t.Fatal("authority render phase not found")
+	}
+	authorityEnd := strings.Index(string(script)[authorityStart:], `elif [[ "${phase}"`)
+	if authorityEnd == -1 {
+		t.Fatal("authority render phase end not found")
+	}
+
+	authority := string(script)[authorityStart : authorityStart+authorityEnd]
+	if !strings.Contains(authority, `source_commit="${SOURCE_COMMIT}"`) {
+		t.Fatal("execution authority does not use the source commit embedded in the images")
+	}
+	if strings.Contains(authority, "git -C") {
+		t.Fatal("execution authority incorrectly uses the lifecycle checkout commit")
 	}
 }
 
