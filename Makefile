@@ -142,6 +142,11 @@ SIGNAL_HARD_ABORT ?= true
 SIGNAL_SOURCE_COMMIT ?=
 SIGNAL_STATIC_PACKAGE_DIGEST ?=
 SIGNAL_AUTHORITY_NAME ?= project-signal-execution-authority
+SIGNAL_PROVIDER_CERTIFICATION_ACTION ?= $(if $(ACTION),$(ACTION),start)
+SIGNAL_PROVIDER_CERTIFICATION_DIR ?= tmp/project-signal-provider-certification
+SIGNAL_PROVIDER_CERTIFICATION_CONFIG ?= $(if $(CONFIG),$(CONFIG),$(SIGNAL_PROVIDER_CERTIFICATION_DIR)/provider-certification.yaml)
+SIGNAL_PROVIDER_CERTIFICATION_SCRIPT := hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh
+SIGNAL_PROVIDER_CERTIFICATION_INIT := hack/agent/skills/project-signal-provider-certification/scripts/init.sh
 SIGNAL_BASELINE_PROFILE_UID ?=
 SIGNAL_VLLM_PROFILE_UID ?=
 SIGNAL_GPU_INVENTORY_TEST_UID ?=
@@ -307,7 +312,7 @@ NET_FRONTEND_CACHE_FILE    := $(NET_FRONTEND_DIST_DIR)/.frontend-build-key
 # Frontend build toggle (dev builds produce unminified output with sourcemaps).
 REACT_DEV ?= false
 
-.PHONY: all help fmt lint lint-actions test build vulncheck check-deps kubectl-unbounded kubectl-unbounded-build install-tools install-protoc install-helm install-kind generate kubectl-unbounded forge relctl relctl-build agent-artifacts-builder agent-artifacts-builder-build orcadev unbounded-agent machina machina-build machina-oci machina-oci-push machina-manifests machine-ops-controller machine-ops-controller-build machine-ops-controller-oci machine-ops-controller-oci-push machine-ops-manifests project-signal-controller project-signal-controller-build project-signal-verify-clean-source project-signal-adapter project-signal-adapter-build project-signal-model-cache project-signal-model-cache-build signal-manifests signal-vllm-cache-handoff image-project-signal-controller-local image-project-signal-adapter-local image-project-signal-certification-runner-local image-project-signal-vllm-canary-local image-project-signal-vllm-model-cache-local metalman metalman-build metalman-oci metalman-oci-push unbounded-operator unbounded-operator-build unbounded-operator-manifests e2e-gantry e2e-racer gomod docs-serve unbounded-net-controller unbounded-net-controller-build unbounded-net-node unbounded-net-node-build unbounded-net-routeplan-debug unping unping-build unroute unroute-build license-check notice notice-check gantry gantry-build gantry-manifests inventory-manifests
+.PHONY: all help fmt lint lint-actions test build vulncheck check-deps kubectl-unbounded kubectl-unbounded-build install-tools install-protoc install-helm install-kind generate kubectl-unbounded forge relctl relctl-build agent-artifacts-builder agent-artifacts-builder-build orcadev unbounded-agent machina machina-build machina-oci machina-oci-push machina-manifests machine-ops-controller machine-ops-controller-build machine-ops-controller-oci machine-ops-controller-oci-push machine-ops-manifests project-signal-controller project-signal-controller-build project-signal-verify-clean-source project-signal-adapter project-signal-adapter-build project-signal-model-cache project-signal-model-cache-build signal-manifests signal-vllm-cache-handoff signal-provider-certification-init signal-provider-certification image-project-signal-controller-local image-project-signal-adapter-local image-project-signal-certification-runner-local image-project-signal-vllm-canary-local image-project-signal-vllm-model-cache-local metalman metalman-build metalman-oci metalman-oci-push unbounded-operator unbounded-operator-build unbounded-operator-manifests e2e-gantry e2e-racer gomod docs-serve unbounded-net-controller unbounded-net-controller-build unbounded-net-node unbounded-net-node-build unbounded-net-routeplan-debug unping unping-build unroute unroute-build license-check notice notice-check gantry gantry-build gantry-manifests inventory-manifests
 .PHONY: net-frontend net-frontend-clean net-ebpf-build net-ebpf-generate net-ebpf-verify net-manifests gantry-chart-lint gantry-chart-package unbounded-operator-chart-lint unbounded-operator-chart-package release-bom release-manifests unbounded-operator-release-manifest
 .PHONY: karpenter karpenter-fmt karpenter-lint karpenter-test karpenter-test-ci karpenter-build karpenter-manifests image-karpenter-local
 .PHONY: image-machina-local image-token-refresher-local image-machine-ops-controller-local image-metalman-local image-unbounded-operator-local image-unbounded-operator-push image-net-controller-local image-net-node-local image-gantry-local image-gantry-push images-local
@@ -376,6 +381,8 @@ help: ## Show this help
 	@echo "  project-signal-model-cache       Build Project Signal model cache verifier"
 	@echo "  signal-manifests                 Render Project Signal manifests"
 	@echo "  signal-vllm-cache-handoff        Prove exclusive RWO cache release after seeding"
+	@echo "  signal-provider-certification-init Create a portable provider certification workspace"
+	@echo "  signal-provider-certification    Run ACTION=start|status|... with CONFIG=..."
 	@echo "  metalman | metalman-build        Build metalman controller (with/without lint/test)"
 	@echo "  unbounded-operator | unbounded-operator-build  Build the top-level Site operator"
 	@echo "  unbounded-net-controller         Build net controller"
@@ -1329,6 +1336,19 @@ project-signal-model-cache-build: ## Build Project Signal model cache verifier w
 	$(GOBUILD) -trimpath -o $(PROJECT_SIGNAL_MODEL_CACHE_BIN) $(PROJECT_SIGNAL_MODEL_CACHE_CMD)
 
 project-signal-model-cache: test project-signal-model-cache-build ## Build Project Signal model cache verifier (implies test)
+
+signal-provider-certification-init: ## Create a portable Project Signal provider certification workspace
+	@bash $(SIGNAL_PROVIDER_CERTIFICATION_INIT) "$(SIGNAL_PROVIDER_CERTIFICATION_DIR)"
+
+signal-provider-certification: ## Run the Project Signal provider certification lifecycle
+	@test -f "$(SIGNAL_PROVIDER_CERTIFICATION_CONFIG)" || { \
+		echo "CONFIG not found: $(SIGNAL_PROVIDER_CERTIFICATION_CONFIG)" >&2; \
+		echo "Run 'make signal-provider-certification-init' first or pass CONFIG=/path/to/provider-certification.yaml" >&2; \
+		exit 1; \
+	}
+	@bash $(SIGNAL_PROVIDER_CERTIFICATION_SCRIPT) \
+		"$(SIGNAL_PROVIDER_CERTIFICATION_ACTION)" \
+		"$(SIGNAL_PROVIDER_CERTIFICATION_CONFIG)"
 
 image-project-signal-controller-local: project-signal-verify-clean-source ## Build Project Signal controller image locally
 	$(CONTAINER_ENGINE) build \

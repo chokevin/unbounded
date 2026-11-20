@@ -23,6 +23,7 @@ does not work on NVSwitch systems.
 | NVSwitch Configuration and Query library | `libnvidia-nscq` | 595.71.05 |
 | NVSwitch Device Monitoring library | `libnvsdm` | 595.71.05 |
 | NVLink Subnet Manager | `nvlsm` | 2025.10.12-1; held |
+| NVIDIA Container Toolkit | `nvidia-container-toolkit` | Newest stable version when the image is built |
 | RDMA | `rdma-core`, `ibverbs-providers`, `ibverbs-utils`, `infiniband-diags`, `perftest` | Ubuntu 24.04 |
 | ConnectX drivers | `mlx5_core`, `mlx5_ib`, `ib_umad` from the Ubuntu kernel | Kernel version |
 
@@ -37,10 +38,11 @@ Manager, NSCQ, and NVSDM package to 595.71.05, so `apt upgrade` cannot mix
 versions. The kernel metapackages and `nvlsm` are held. To move to a newer
 kernel or driver, build a new image and reinstall the machine.
 
-The image does not include the CUDA toolkit, the NVIDIA Container Toolkit,
-IMEX, `nvidia-fs`, or DOCA-OFED. Workload containers bring CUDA. The agent's
-`agent-*-nvidia` rootfs images bring the container toolkit. IMEX is only for
-multi-node NVLink domains, and its unit is masked.
+The image includes the NVIDIA Container Toolkit because `none` isolation runs
+containerd directly on the host. The agent's `agent-*-nvidia` rootfs images
+include the same runtime dependency for `nspawn` isolation. The image does not
+include the CUDA toolkit, IMEX, `nvidia-fs`, or DOCA-OFED. Workload containers
+bring CUDA. IMEX is only for multi-node NVLink domains, and its unit is masked.
 
 The image keeps the Metalman contracts of `host-ubuntu2404`: `/disk/disk.img.gz`
 is a GPT disk with an EFI system partition and an ext4 root file system, the
@@ -156,10 +158,10 @@ Build arguments:
 The build checks the disk image with
 `images/host-ubuntu2404-nvidia/assets/validate.sh` and fails if a check fails.
 It checks the boot files on the ESP, the kernel and initramfs, the GPU and
-RDMA kernel modules for the image's kernel, the Fabric Manager, NVLSM, and
-RDMA binaries, the enabled units, the cloud-init and netplan files, and that
-no DKMS private key, SSH host key, or machine ID is in the image. To run it on
-a built image:
+RDMA kernel modules for the image's kernel, the Fabric Manager, NVLSM, NVIDIA
+Container Toolkit, and RDMA binaries, the enabled units, the cloud-init and
+netplan files, and that no DKMS private key, SSH host key, or machine ID is in
+the image. To run it on a built image:
 
 ```bash
 docker buildx build --platform linux/amd64 \

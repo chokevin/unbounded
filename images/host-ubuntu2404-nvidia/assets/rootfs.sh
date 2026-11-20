@@ -65,9 +65,23 @@ echo "grub-efi-amd64 grub2/update_nvram boolean false" | debconf-set-selections
 retry apt-get update
 apt_install ca-certificates curl gnupg
 
+# The installed system boots from its local disk and configures networking
+# after the root file system is mounted. Do not copy dhcpcd into the initramfs.
+rm -f /usr/share/initramfs-tools/hooks/dhcpcd
+
 # Install the kernel first so that DKMS builds the GPU driver against it.
 apt_install "$KERNEL_PACKAGE" "linux-headers-$KERNEL_FLAVOR" initramfs-tools \
   shim-signed grub-efi-amd64-signed grub-efi-amd64-bin efibootmgr mokutil
+
+# Isolation mode none runs containerd directly on the host. Install the
+# NVIDIA Container Toolkit so the agent can configure the host runtime.
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey |
+  gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list |
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+    > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+retry apt-get update
+apt_install nvidia-container-toolkit
 
 # The NVIDIA CUDA repository carries the open GPU driver, Fabric Manager,
 # NSCQ, NVSDM, and NVLSM builds that match each other. The pinning package

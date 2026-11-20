@@ -62,6 +62,66 @@ func TestWholeNodeCertificationBundle(t *testing.T) {
 	testMaterializer(t, materializer)
 }
 
+func TestProviderCertificationInitCreatesPortableWorkspace(t *testing.T) {
+	t.Parallel()
+
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(t.TempDir(), "project-signal")
+	command := exec.Command(
+		"bash",
+		filepath.Join(
+			repoRoot,
+			"hack/agent/skills/project-signal-provider-certification/scripts/init.sh",
+		),
+		target,
+	)
+
+	command.Dir = repoRoot
+	if output, runErr := command.CombinedOutput(); runErr != nil {
+		t.Fatalf("initialize provider certification workspace: %v\n%s", runErr, output)
+	}
+
+	config, err := os.ReadFile(filepath.Join(target, "provider-certification.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(config), "metricsOverlay: metrics-overlay") {
+		t.Fatal("generated config does not reference its local metrics overlay")
+	}
+
+	kustomization, err := os.ReadFile(filepath.Join(target, "metrics-overlay", "kustomization.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(kustomization), "../metrics-base") {
+		t.Fatal("generated metrics overlay does not reference the copied metrics base")
+	}
+
+	if _, err := os.Stat(filepath.Join(target, "metrics-base", "kustomization.yaml")); err != nil {
+		t.Fatalf("generated workspace does not contain its metrics base: %v", err)
+	}
+
+	second := exec.Command(
+		"bash",
+		filepath.Join(
+			repoRoot,
+			"hack/agent/skills/project-signal-provider-certification/scripts/init.sh",
+		),
+		target,
+	)
+
+	second.Dir = repoRoot
+	if output, runErr := second.CombinedOutput(); runErr == nil {
+		t.Fatalf("initializer overwrote an existing workspace:\n%s", output)
+	}
+}
+
 func TestProviderCertificationPreflightDiscoversSelectedNodes(t *testing.T) {
 	t.Parallel()
 
@@ -73,12 +133,15 @@ func TestProviderCertificationPreflightDiscoversSelectedNodes(t *testing.T) {
 	tempDir := t.TempDir()
 	binDir := filepath.Join(tempDir, "bin")
 	metricsDir := filepath.Join(tempDir, "metrics")
+
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.MkdirAll(metricsDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(metricsDir, "kustomization.yaml"), []byte(
 		"apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n",
 	), 0o600); err != nil {
@@ -159,6 +222,7 @@ esac
 `)
 
 	configPath := filepath.Join(tempDir, "config.yaml")
+
 	config := fmt.Sprintf(`apiVersion: signal.unbounded-cloud.io/v1alpha1
 kind: CertificationDeployment
 metadata:
@@ -188,71 +252,86 @@ spec:
 	)
 	command := exec.Command(script, "preflight", configPath)
 	command.Dir = repoRoot
+
 	command.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"))
+
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("preflight two discovered Nodes: %v\n%s", err, output)
 	}
+
 	if !strings.Contains(string(output), "nodes=2") {
 		t.Fatalf("preflight output does not report discovered Nodes:\n%s", output)
 	}
 
 	command = exec.Command(script, "preflight", configPath)
 	command.Dir = repoRoot
+
 	command.Env = append(
 		os.Environ(),
 		"PATH="+binDir+":"+os.Getenv("PATH"),
 		"MOCK_NODE_COUNT=0",
 	)
+
 	output, err = command.CombinedOutput()
 	if err == nil {
 		t.Fatalf("preflight unexpectedly accepted an empty provider selector:\n%s", output)
 	}
+
 	if !strings.Contains(string(output), "did not match any provider Nodes") {
 		t.Fatalf("empty-selector failure is unclear:\n%s", output)
 	}
 
 	command = exec.Command(script, "preflight", configPath)
 	command.Dir = repoRoot
+
 	command.Env = append(
 		os.Environ(),
 		"PATH="+binDir+":"+os.Getenv("PATH"),
 		"MOCK_ACTIVE_GPU_WORKLOAD=true",
 	)
+
 	output, err = command.CombinedOutput()
 	if err == nil {
 		t.Fatalf("preflight unexpectedly accepted an active GPU workload:\n%s", output)
 	}
+
 	if !strings.Contains(string(output), "provider Nodes have active GPU workloads") {
 		t.Fatalf("active GPU workload failure is unclear:\n%s", output)
 	}
 
 	command = exec.Command(script, "preflight", configPath)
 	command.Dir = repoRoot
+
 	command.Env = append(
 		os.Environ(),
 		"PATH="+binDir+":"+os.Getenv("PATH"),
 		"MOCK_ISOLATION_MODE=nspawn",
 	)
+
 	output, err = command.CombinedOutput()
 	if err == nil {
 		t.Fatalf("preflight unexpectedly accepted nspawn isolation:\n%s", output)
 	}
+
 	if !strings.Contains(string(output), "status.isolation=none") {
 		t.Fatalf("nspawn isolation failure is unclear:\n%s", output)
 	}
 
 	command = exec.Command(script, "preflight", configPath)
 	command.Dir = repoRoot
+
 	command.Env = append(
 		os.Environ(),
 		"PATH="+binDir+":"+os.Getenv("PATH"),
 		"MOCK_MISSING_MACHINE=true",
 	)
+
 	output, err = command.CombinedOutput()
 	if err == nil {
 		t.Fatalf("preflight unexpectedly accepted a Node without a Machine:\n%s", output)
 	}
+
 	if !strings.Contains(string(output), "Machine not found") {
 		t.Fatalf("missing Machine failure is unclear:\n%s", output)
 	}
@@ -301,6 +380,7 @@ func TestProviderCertificationAllowsIntentionalRemoteWriteFiltering(t *testing.T
 	if strings.Contains(string(script), "prometheus_remote_storage_samples_dropped_total") {
 		t.Fatal("remote-write validation rejects samples intentionally filtered by write relabeling")
 	}
+
 	if !strings.Contains(string(script), "prometheus_remote_storage_samples_failed_total") {
 		t.Fatal("remote-write validation no longer checks non-recoverable failures")
 	}
@@ -322,6 +402,7 @@ func TestProviderCertificationAuthorityUsesImageSourceCommit(t *testing.T) {
 	if authorityStart == -1 {
 		t.Fatal("authority render phase not found")
 	}
+
 	authorityEnd := strings.Index(string(script)[authorityStart:], `elif [[ "${phase}"`)
 	if authorityEnd == -1 {
 		t.Fatal("authority render phase end not found")
@@ -331,6 +412,7 @@ func TestProviderCertificationAuthorityUsesImageSourceCommit(t *testing.T) {
 	if !strings.Contains(authority, `source_commit="${SOURCE_COMMIT}"`) {
 		t.Fatal("execution authority does not use the source commit embedded in the images")
 	}
+
 	if strings.Contains(authority, "git -C") {
 		t.Fatal("execution authority incorrectly uses the lifecycle checkout commit")
 	}
@@ -352,6 +434,7 @@ func TestProviderCertificationResetsOnlyEmptyExpiredSmokeCampaigns(t *testing.T)
 	if !strings.Contains(source, `.status.phase == "Completed"`) {
 		t.Fatal("smoke retry does not require the prior campaign to be completed")
 	}
+
 	for _, field := range []string{
 		".status.succeededRuns",
 		".status.failedRuns",
@@ -362,6 +445,7 @@ func TestProviderCertificationResetsOnlyEmptyExpiredSmokeCampaigns(t *testing.T)
 			t.Fatalf("smoke retry does not guard %s", field)
 		}
 	}
+
 	if !strings.Contains(source, "reset empty smoke campaigns whose admission window expired") {
 		t.Fatal("empty expired smoke campaign reset is missing")
 	}
@@ -427,6 +511,7 @@ func TestWholeNodeBurnCommandsInvokeScriptsOnSeparateLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !found {
 		t.Fatal("workflow templates are missing")
 	}
@@ -444,10 +529,12 @@ func TestWholeNodeBurnCommandsInvokeScriptsOnSeparateLines(t *testing.T) {
 		if !ok {
 			continue
 		}
+
 		containers, found, err := unstructured.NestedSlice(template, "containerSet", "containers")
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !found {
 			continue
 		}
@@ -457,15 +544,19 @@ func TestWholeNodeBurnCommandsInvokeScriptsOnSeparateLines(t *testing.T) {
 			if !ok {
 				t.Fatal("workflow container has an invalid shape")
 			}
+
 			name, _, _ := unstructured.NestedString(container, "name")
+
 			component, ok := wantComponents[name]
 			if !ok {
 				continue
 			}
+
 			args, found, err := unstructured.NestedStringSlice(container, "args")
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if !found || len(args) != 1 {
 				t.Fatalf("container %q has invalid shell arguments", name)
 			}
@@ -474,6 +565,7 @@ func TestWholeNodeBurnCommandsInvokeScriptsOnSeparateLines(t *testing.T) {
 			if !strings.Contains(args[0], want) {
 				t.Fatalf("container %q does not invoke its script on a separate line", name)
 			}
+
 			checked++
 		}
 	}
@@ -502,6 +594,7 @@ func TestWholeNodeBurnOutputsDoNotOverlapSharedVolume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !found {
 		t.Fatal("workflow templates are missing")
 	}
@@ -519,34 +612,43 @@ func TestWholeNodeBurnOutputsDoNotOverlapSharedVolume(t *testing.T) {
 		if !ok {
 			continue
 		}
+
 		name, _, _ := unstructured.NestedString(template, "name")
 		if name != "burn" {
 			continue
 		}
+
 		parameters, found, err := unstructured.NestedSlice(template, "outputs", "parameters")
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if !found {
 			t.Fatal("burn output parameters are missing")
 		}
+
 		for _, parameterValue := range parameters {
 			parameter, ok := parameterValue.(map[string]any)
 			if !ok {
 				t.Fatal("burn output parameter has an invalid shape")
 			}
+
 			parameterName, _, _ := unstructured.NestedString(parameter, "name")
+
 			wantPath, ok := wantPaths[parameterName]
 			if !ok {
 				continue
 			}
+
 			path, _, _ := unstructured.NestedString(parameter, "valueFrom", "path")
 			if path != wantPath {
 				t.Fatalf("output %q path = %q, want %q", parameterName, path, wantPath)
 			}
+
 			if strings.HasPrefix(path, "/results/") {
 				t.Fatalf("output %q overlaps the shared results volume", parameterName)
 			}
+
 			checked++
 		}
 	}
@@ -556,7 +658,7 @@ func TestWholeNodeBurnOutputsDoNotOverlapSharedVolume(t *testing.T) {
 	}
 }
 
-func writeExecutable(t *testing.T, path string, content string) {
+func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
 
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
@@ -572,6 +674,7 @@ func decodeCertificationBundle(t *testing.T, rendered []byte) []unstructured.Uns
 
 	for {
 		var object unstructured.Unstructured
+
 		err := decoder.Decode(&object.Object)
 		if errors.Is(err, io.EOF) {
 			return objects
@@ -677,6 +780,7 @@ func assertTestArtifactDigest(t *testing.T, test unstructured.Unstructured) {
 	content, _ := artifact["content"].(string)
 	digest, _ := artifact["digest"].(string)
 	sum := sha256.Sum256([]byte(content))
+
 	expected := "sha256:" + hex.EncodeToString(sum[:])
 	if digest != expected {
 		t.Fatalf("artifact digest = %q, want %q", digest, expected)
@@ -795,6 +899,7 @@ func testMaterializer(t *testing.T, materializer string) {
 
 	t.Run("missing parameter", func(t *testing.T) {
 		delete(allowed, "STORAGE_MIB")
+
 		output := runMaterializer(
 			t,
 			materializer,
@@ -845,6 +950,7 @@ func runMaterializer(
 
 	materializer = strings.ReplaceAll(materializer, "/scripts/", scriptsDir+"/")
 	command := exec.Command("/bin/bash", "-c", materializer)
+
 	command.Env = append(
 		os.Environ(),
 		"PROJECT_SIGNAL_SCRIPT_NAME=burn.sh",
@@ -852,6 +958,7 @@ func runMaterializer(
 		"PROJECT_SIGNAL_SCRIPT_DIGEST="+digest,
 		"PROJECT_SIGNAL_PARAMETERS_JSON="+parameters,
 	)
+
 	output, err := command.CombinedOutput()
 	if wantSuccess && err != nil {
 		t.Fatalf("materializer failed: %v\n%s", err, output)

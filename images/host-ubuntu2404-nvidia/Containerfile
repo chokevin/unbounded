@@ -35,7 +35,10 @@ RUN test "${TARGETARCH}" = amd64 || { echo "amd64 only, not ${TARGETARCH}" >&2; 
     (cd /tmp && grep " \*\?${tarball}\$" SHA256SUMS | sha256sum -c -) && \
     mkdir /rootfs && \
     tar --extract --xz --file="/tmp/${tarball}" --numeric-owner --xattrs \
-      --xattrs-include='*' -C /rootfs && \
+      --xattrs-include='*' --exclude='dev/*' -C /rootfs && \
+    for device in console full null ptmx random tty urandom zero; do \
+      : > "/rootfs/dev/${device}"; \
+    done && \
     rm -f "/tmp/${tarball}" /rootfs/etc/resolv.conf && \
     : > /rootfs/etc/resolv.conf
 

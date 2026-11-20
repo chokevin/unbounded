@@ -57,30 +57,40 @@ Helm commands. The kubeconfig's current context may point somewhere else.
 
 ## Commands
 
+Create a portable workspace containing the deployment config, metrics base, and
+metrics overlay:
+
 ```bash
-skill=./hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh
-config=/secure/path/provider-certification.yaml
+make signal-provider-certification-init \
+  SIGNAL_PROVIDER_CERTIFICATION_DIR=/secure/path/project-signal
+```
+
+Replace the placeholders in `provider-certification.yaml` and
+`metrics-overlay/*.yaml`, then use the top-level lifecycle target:
+
+```bash
+config=/secure/path/project-signal/provider-certification.yaml
 
 # Read-only validation.
-"$skill" preflight "$config"
+make signal-provider-certification ACTION=preflight CONFIG="$config"
 
 # Idempotent controller, catalog, and metrics installation.
-"$skill" install "$config"
+make signal-provider-certification ACTION=install CONFIG="$config"
 
 # Two-minute burn on every selected Node, then require every Run to pass.
-"$skill" smoke "$config"
+make signal-provider-certification ACTION=smoke CONFIG="$config"
 
 # Launch one 24-hour burn on every selected Node.
-"$skill" run "$config"
+make signal-provider-certification ACTION=run CONFIG="$config"
 
 # Install, smoke, and launch the 24-hour run in one command.
-"$skill" start "$config"
+make signal-provider-certification ACTION=start CONFIG="$config"
 
 # Show Campaign, Run, Workflow, Pod, and remote-write state.
-"$skill" status "$config"
+make signal-provider-certification ACTION=status CONFIG="$config"
 
 # Cancel active Runs, release Nodes, and remove the complete Signal stack.
-"$skill" uninstall "$config"
+make signal-provider-certification ACTION=uninstall CONFIG="$config"
 ```
 
 `start` is the normal clean-cluster path. Each phase discovers the complete
