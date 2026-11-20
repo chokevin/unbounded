@@ -301,6 +301,23 @@ func TestProviderCertificationResetsOnlyEmptyExpiredSmokeCampaigns(t *testing.T)
 	}
 }
 
+func TestProviderCertificationAppliesCompiledPackageToSignalNamespace(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"..",
+		"..",
+		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(script), `kube_apply_file "${package}" "${namespace}"`) {
+		t.Fatal("compiled certification package is not applied to the Signal namespace")
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 

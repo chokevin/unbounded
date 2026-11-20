@@ -109,11 +109,17 @@ kube() {
 
 kube_apply_file() {
   local path="$1"
+  local namespace="${2:-}"
+  local -a namespace_args=()
+
+  if [[ -n "${namespace}" ]]; then
+    namespace_args=(-n "${namespace}")
+  fi
 
   if [[ -n "${REMOTE_HOST:-}" ]]; then
-    remote_exec kubectl --context "${CONTEXT}" apply -f - <"${path}"
+    remote_exec kubectl --context "${CONTEXT}" "${namespace_args[@]}" apply -f - <"${path}"
   else
-    kube apply -f "${path}"
+    kube "${namespace_args[@]}" apply -f "${path}"
   fi
 }
 
@@ -762,7 +768,7 @@ render_run_package() {
       --bindings "${WORK_DIR}/certification-bindings.yaml" \
       --inputs "${inputs}" >"${package}"
   )
-  kube_apply_file "${package}"
+  kube_apply_file "${package}" "${namespace}"
 }
 
 apply_profile_and_policy() {
