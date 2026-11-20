@@ -366,6 +366,107 @@ func TestWholeNodeBurnProducesQualificationFingerprint(t *testing.T) {
 	}
 }
 
+func TestWholeNodeBurnCommandsInvokeScriptsOnSeparateLines(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := os.ReadFile(filepath.Join(
+		"certification/whole-node-24h/workflow-template.yaml",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	objects := decodeCertificationBundle(t, manifest)
+	if len(objects) != 1 {
+		t.Fatalf("got %d workflow objects, want 1", len(objects))
+	}
+
+	templates, found, err := unstructured.NestedSlice(objects[0].Object, "spec", "templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("workflow templates are missing")
+	}
+
+	wantComponents := map[string]string{
+		"main":              "gpu-burn",
+		"cpu-stress":        "cpu-stress",
+		"memory-integrity":  "memory-integrity",
+		"storage-integrity": "storage-integrity",
+	}
+	checked := 0
+
+	for _, templateValue := range templates {
+		template, ok := templateValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		containers, found, err := unstructured.NestedSlice(template, "containerSet", "containers")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !found {
+			continue
+		}
+
+		for _, containerValue := range containers {
+			container, ok := containerValue.(map[string]any)
+			if !ok {
+				t.Fatal("workflow container has an invalid shape")
+			}
+			name, _, _ := unstructured.NestedString(container, "name")
+			component, ok := wantComponents[name]
+			if !ok {
+				continue
+			}
+			args, found, err := unstructured.NestedStringSlice(container, "args")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !found || len(args) != 1 {
+				t.Fatalf("container %q has invalid shell arguments", name)
+			}
+
+			want := ". /scripts/parameters.env\n/scripts/gpu-burn-canary.sh " + component
+			if !strings.Contains(args[0], want) {
+				t.Fatalf("container %q does not invoke its script on a separate line", name)
+			}
+			checked++
+		}
+	}
+
+	if checked != len(wantComponents) {
+		t.Fatalf("checked %d burn containers, want %d", checked, len(wantComponents))
+	}
+}
+
+func TestWholeNodeBurnUsesNVMLXidEvents(t *testing.T) {
+	t.Parallel()
+
+	script, err := os.ReadFile(filepath.Join(
+		"certification/whole-node-24h/gpu-burn-canary.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := string(script)
+	for _, required := range []string{
+		"nvmlDeviceRegisterEvents",
+		"nvmlEventSetWait_v2",
+		"ctypes.c_ulonglong(0x8)",
+		"NewXidDetected",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("NVML Xid monitor is missing %q", required)
+		}
+	}
+	if strings.Contains(source, "dmesg") {
+		t.Fatal("burn script still depends on container kernel-log access")
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 

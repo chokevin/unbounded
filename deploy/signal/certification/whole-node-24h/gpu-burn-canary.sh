@@ -18,6 +18,11 @@ component="${PROJECT_SIGNAL_BURN_COMPONENT:-${1:-standalone}}"
 gpu_completed=false
 finished_normally=false
 component_wait_limit=600
+xid_monitor_pid=
+xid_monitor_ready=/work/xid-monitor-ready
+xid_monitor_stop=/work/xid-monitor-stop
+xid_monitor_events=/results/xid-events.txt
+xid_monitor_error=/results/xid-monitor-error.txt
 
 emit_stage() {
   local name="$1"
@@ -44,10 +49,153 @@ trim() {
   printf '%s' "${value}"
 }
 
-xid_count() {
-  local messages
-  messages="$(dmesg 2>/dev/null)" || return 1
-  grep -Eic 'NVRM: Xid|Xid \(' <<< "${messages}" || true
+start_xid_monitor() {
+  local waited
+
+  rm -f \
+    "${xid_monitor_ready}" \
+    "${xid_monitor_stop}" \
+    "${xid_monitor_events}" \
+    "${xid_monitor_error}"
+  python3 - \
+    "${EXPECTED_GPU_COUNT}" \
+    "${xid_monitor_ready}" \
+    "${xid_monitor_stop}" \
+    "${xid_monitor_events}" \
+    "${xid_monitor_error}" <<'PY' &
+import ctypes
+import os
+import pathlib
+import sys
+import time
+
+gpu_count, ready_path, stop_path, events_path, error_path = sys.argv[1:]
+gpu_count = int(gpu_count)
+ready = pathlib.Path(ready_path)
+stop = pathlib.Path(stop_path)
+events = pathlib.Path(events_path)
+error = pathlib.Path(error_path)
+event_set = ctypes.c_void_p()
+initialized = False
+nvml = None
+
+
+class EventData(ctypes.Structure):
+    _fields_ = [
+        ("device", ctypes.c_void_p),
+        ("event_type", ctypes.c_ulonglong),
+        ("event_data", ctypes.c_ulonglong),
+        ("gpu_instance_id", ctypes.c_uint),
+        ("compute_instance_id", ctypes.c_uint),
+    ]
+
+
+def check(nvml, name, *args):
+    result = getattr(nvml, name)(*args)
+    if result != 0:
+        raise RuntimeError(f"{name} returned NVML status {result}")
+
+
+try:
+    nvml = ctypes.CDLL("libnvidia-ml.so.1")
+    check(nvml, "nvmlInit_v2")
+    initialized = True
+    check(nvml, "nvmlEventSetCreate", ctypes.byref(event_set))
+
+    for index in range(gpu_count):
+        device = ctypes.c_void_p()
+        check(
+            nvml,
+            "nvmlDeviceGetHandleByIndex_v2",
+            ctypes.c_uint(index),
+            ctypes.byref(device),
+        )
+        check(
+            nvml,
+            "nvmlDeviceRegisterEvents",
+            device,
+            ctypes.c_ulonglong(0x8),
+            event_set,
+        )
+
+    ready_tmp = ready.with_suffix(".tmp")
+    ready_tmp.write_text("ready", encoding="utf-8")
+    os.replace(ready_tmp, ready)
+
+    with events.open("a", encoding="utf-8", buffering=1) as output:
+        while not stop.exists():
+            event = EventData()
+            result = nvml.nvmlEventSetWait_v2(
+                event_set,
+                ctypes.byref(event),
+                ctypes.c_uint(1000),
+            )
+            if result == 10:
+                continue
+            if result != 0:
+                raise RuntimeError(
+                    f"nvmlEventSetWait_v2 returned NVML status {result}"
+                )
+            output.write(
+                f"event_type={event.event_type} xid={event.event_data} "
+                f"gpu_instance={event.gpu_instance_id} "
+                f"compute_instance={event.compute_instance_id}\n"
+            )
+except Exception as exception:
+    error.write_text(str(exception), encoding="utf-8")
+    raise
+finally:
+    try:
+        if nvml is not None and event_set.value:
+            nvml.nvmlEventSetFree(event_set)
+        if nvml is not None and initialized:
+            nvml.nvmlShutdown()
+    except Exception:
+        pass
+
+if not stop.exists():
+    time.sleep(0.1)
+PY
+  xid_monitor_pid=$!
+
+  for ((waited = 0; waited < 10; waited++)); do
+    if [[ -e "${xid_monitor_ready}" ]]; then
+      return 0
+    fi
+    if ! kill -0 "${xid_monitor_pid}" 2>/dev/null; then
+      wait "${xid_monitor_pid}" 2>/dev/null || true
+      xid_monitor_pid=
+      return 1
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+check_xid_monitor() {
+  if [[ -s "${xid_monitor_events}" ]]; then
+    fail NewXidDetected "$(tr '\n' ';' < "${xid_monitor_events}")"
+    return 1
+  fi
+  if [[ -z "${xid_monitor_pid}" ]] || ! kill -0 "${xid_monitor_pid}" 2>/dev/null; then
+    if [[ -n "${xid_monitor_pid}" ]]; then
+      wait "${xid_monitor_pid}" 2>/dev/null || true
+      xid_monitor_pid=
+    fi
+    fail XidTelemetryUnavailable "$(cat "${xid_monitor_error}" 2>/dev/null || true)"
+    return 1
+  fi
+}
+
+stop_xid_monitor() {
+  if [[ -z "${xid_monitor_pid}" ]]; then
+    return
+  fi
+
+  touch "${xid_monitor_stop}" 2>/dev/null || true
+  wait "${xid_monitor_pid}" 2>/dev/null || true
+  xid_monitor_pid=
 }
 
 write_qualification_fingerprint() {
@@ -394,6 +542,7 @@ validate_gpu_measurements() {
 
 finish() {
   local exit_code=$?
+  stop_xid_monitor
   stop_workers
   if [[ "${verdict}" == Pass ]] && { (( exit_code != 0 )) || ! "${finished_normally}"; }; then
     verdict=Inconclusive
@@ -481,11 +630,10 @@ elif [[ -z "${EXPECTED_GPU_PRODUCT_REGEX:-}" ]]; then
 elif ! command -v gpu_burn >/dev/null 2>&1 ||
      ! command -v nvidia-smi >/dev/null 2>&1; then
   fail BurnToolMissing
-elif ! dmesg >/dev/null 2>&1; then
-  fail XidTelemetryUnavailable "privileged dmesg access is required"
 else
-  if ! baseline_xids="$(xid_count)"; then
-    fail XidTelemetryUnavailable "Cannot capture baseline kernel Xid telemetry"
+  if ! start_xid_monitor; then
+    fail XidTelemetryUnavailable \
+      "Cannot subscribe to NVML Xid events: $(cat "${xid_monitor_error}" 2>/dev/null || true)"
   fi
   capture_telemetry baseline || true
 fi
@@ -497,7 +645,7 @@ if [[ "${verdict}" != Pass ]]; then
 fi
 
 emit_stage preflight passed InventoryAndSafetyTelemetryReady \
-  "gpus=${EXPECTED_GPU_COUNT} baseline_xids=${baseline_xids}"
+  "gpus=${EXPECTED_GPU_COUNT} xid_monitor=nvml"
 emit_stage workload running BurnCanaryStarted \
   "duration_seconds=${BURN_DURATION_SECONDS} gpu_memory_percent=50 cpu_workers=${CPU_WORKERS}"
 
@@ -598,12 +746,7 @@ while [[ "${verdict}" == Pass ]] && (( $(date +%s) < end_epoch )); do
     fi
   done
   capture_telemetry sample || true
-  if ! current_xids="$(xid_count)"; then
-    fail XidTelemetryUnavailable "Kernel Xid telemetry became unavailable during the workload"
-  fi
-  if (( current_xids > baseline_xids )); then
-    fail NewXidDetected "xids=${baseline_xids}->${current_xids}"
-  fi
+  check_xid_monitor || true
 
   if [[ "${verdict}" != Pass ]]; then
     break
@@ -649,12 +792,8 @@ fi
 
 emit_stage health-after running
 capture_telemetry final || true
-if ! final_xids="$(xid_count)"; then
-  fail XidTelemetryUnavailable "Cannot capture final kernel Xid telemetry"
-fi
-if (( final_xids > baseline_xids )); then
-  fail NewXidDetected "xids=${baseline_xids}->${final_xids}"
-fi
+check_xid_monitor || true
+stop_xid_monitor
 
 if [[ "${verdict}" == Pass ]]; then
   emit_stage health-after passed BurnHealthAfterPassed

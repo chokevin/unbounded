@@ -52,17 +52,16 @@ spec:
   - containerSet:
       containers:
       - args:
-        - 'set +e
-        . /scripts/parameters.env
+        - |-
+          set +e
+          . /scripts/parameters.env
           /scripts/gpu-burn-canary.sh gpu-burn
 
           status=$?
 
-          printf ''%s'' "$status" > /results/gpu-burn-exit-code
+          printf '%s' "$status" > /results/gpu-burn-exit-code
 
           exit 0
-
-          '
         command:
         - /bin/bash
         - -c
@@ -85,17 +84,16 @@ spec:
           allowPrivilegeEscalation: true
           privileged: true
       - args:
-        - 'set +e
-        . /scripts/parameters.env
+        - |-
+          set +e
+          . /scripts/parameters.env
           /scripts/gpu-burn-canary.sh cpu-stress
 
           status=$?
 
-          printf ''%s'' "$status" > /results/cpu-stress-exit-code
+          printf '%s' "$status" > /results/cpu-stress-exit-code
 
           exit 0
-
-          '
         command:
         - /bin/bash
         - -c
@@ -113,17 +111,16 @@ spec:
             cpu: '24'
             memory: 8Gi
       - args:
-        - 'set +e
-        . /scripts/parameters.env
+        - |-
+          set +e
+          . /scripts/parameters.env
           /scripts/gpu-burn-canary.sh memory-integrity
 
           status=$?
 
-          printf ''%s'' "$status" > /results/memory-integrity-exit-code
+          printf '%s' "$status" > /results/memory-integrity-exit-code
 
           exit 0
-
-          '
         command:
         - /bin/bash
         - -c
@@ -141,17 +138,16 @@ spec:
             cpu: '2'
             memory: 40Gi
       - args:
-        - 'set +e
-        . /scripts/parameters.env
+        - |-
+          set +e
+          . /scripts/parameters.env
           /scripts/gpu-burn-canary.sh storage-integrity
 
           status=$?
 
-          printf ''%s'' "$status" > /results/storage-integrity-exit-code
+          printf '%s' "$status" > /results/storage-integrity-exit-code
 
           exit 0
-
-          '
         command:
         - /bin/bash
         - -c
