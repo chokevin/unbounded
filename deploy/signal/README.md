@@ -135,6 +135,27 @@ covered device labels remain redacted as `gpu-index-N`; missing, mixed,
 malformed, duplicate, gapped, partial, or changed identity evidence fails
 closed.
 
+## Three-node provider certification
+
+The repository includes a reproducible 24-hour whole-node certification bundle
+under `deploy/signal/certification/whole-node-24h/`. It embeds the reviewed burn
+script in the `CertificationTest`, verifies the script digest before execution,
+and does not depend on a pre-created script ConfigMap.
+
+Use the
+`hack/agent/skills/project-signal-provider-certification/` skill for the
+clean-cluster workflow. It preflights exactly three eight-GPU Nodes, installs
+the pinned Argo and Signal runtimes, records trust for the exact rendered Test
+digest, installs the central metrics overlay, requires healthy remote-write,
+runs a two-minute smoke, and then launches one 24-hour burn per Node.
+
+The public repository owns the controllers, burn contract, DCGM exporter,
+Prometheus base, label semantics, and validation gates. The organization-owned
+Kustomize overlay owns internal remote-write endpoints, identities, Secret
+references, and Grafana assignments. Start that overlay from
+`deploy/signal/observability/overlay.example/`; never commit real internal
+values to this repository.
+
 ## CertificationSuite contract
 
 A phase-based Suite is an ordered execution plan:
@@ -272,11 +293,14 @@ Legacy `spec.scriptBundle` plus `spec.checks` remains readable and executable
 for migration. A Suite must use exactly one model: phases or legacy checks.
 Do not create new qualification definitions with the legacy model.
 
-Team-owned R01 through R15 scripts belong in private, digest-pinned
-`CertificationTest` resources and a private Suite DAG. They must not be copied
-into the public Project Signal package or represented by repeated placeholder
-tests. Each independently meaningful script is one Test; the Suite binds its
-parameters, dependencies, schedule, retry policy, and typed assertions.
+Team-owned and vendor-specific diagnostic scripts belong in private,
+digest-pinned `CertificationTest` resources and a private Suite DAG. They must
+not be copied into the public Project Signal package or represented by repeated
+placeholder tests. The repository-owned whole-node certification under
+`deploy/signal/certification/whole-node-24h/` is the public, portable successor
+to the historical private burn row. Each independently meaningful script is
+one Test; the Suite binds its parameters, dependencies, schedule, retry policy,
+and typed assertions.
 
 Suite edits affect only future Runs.
 

@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: project-signal
+  labels:
+    app.kubernetes.io/part-of: project-signal

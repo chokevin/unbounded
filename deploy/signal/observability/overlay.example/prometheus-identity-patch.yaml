@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: project-signal-central-prometheus
+  namespace: project-signal
+spec:
+  template:
+    spec:
+      containers:
+        - name: prometheus
+          volumeMounts:
+            - name: remote-write-identity
+              mountPath: /var/run/project-signal-metrics
+              readOnly: true
+      volumes:
+        - name: remote-write-identity
+          secret:
+            secretName: replace-with-remote-write-identity-secret

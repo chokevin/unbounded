@@ -1,0 +1,30 @@
+apiVersion: signal.unbounded-cloud.io/v1alpha1
+kind: CertificationDeployment
+metadata:
+  name: three-node-24h
+spec:
+  context: replace-with-kube-context
+  cluster: replace-with-actual-cluster-identifier
+  environment: certification
+  expectedNodeCount: 3
+  nodeSelector:
+    unbounded-cloud.io/site: replace-with-provider-identifier
+  providerLabel: unbounded-cloud.io/site
+  expectedGPUCount: 8
+  expectedGPUProductRegex: "^NVIDIA B200$"
+  cpuWorkers: 32
+  memoryMiB: 8192
+  storageMiB: 8192
+  sampleIntervalSeconds: 10
+  metricsOverlay: replace-with-internal-metrics-overlay-directory
+  # When the Kubernetes API is reachable only from a jumpbox, uncomment this
+  # block. Paths are local paths and may be relative to this config file.
+  # execution:
+  #   ssh:
+  #     host: user@jumpbox.example
+  #     port: 22
+  #     identityFile: identity-file
+  #     controlPath: existing-control-socket
+  images:
+    controller: projectsignalpublic.azurecr.io/project-signal/controller@sha256:a8cfa70eaee270a03154adbcf63c0e9f28740efe762147e53d9b0ed5cb234833
+    adapter: projectsignalpublic.azurecr.io/project-signal/adapter@sha256:3db248a0018fb8800d3aa3380905675f81687c0f223f96419cef94b41ba96fb8

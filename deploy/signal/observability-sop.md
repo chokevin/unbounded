@@ -110,10 +110,13 @@ certification node taints, and verify one healthy target per GPU node.
 
 ## Prometheus remote-write integration
 
-Deployments that use a Prometheus-compatible central backend may extend the
-namespace-local scraper or deploy a separate collector. The extension must:
+Deployments that use a Prometheus-compatible central backend should build a
+Kustomize overlay on `deploy/signal/observability/base/`. The base installs one
+central collector plus the pinned DCGM exporter and scrapes controller, live
+workload, GPU, and its own transport metrics. The overlay must:
 
-- preserve the upstream controller and live-workload scrape jobs;
+- replace the placeholder cluster identity with the actual cluster identifier;
+- preserve the upstream controller and annotated Pod scrape jobs;
 - add the standard labels from this document;
 - derive `provider` from Kubernetes node discovery;
 - load credentials from Secret references or workload identity;
@@ -121,7 +124,11 @@ namespace-local scraper or deploy a separate collector. The extension must:
 - expose sent, failed, retried, pending, and dropped sample metrics.
 
 Backend URLs, identity IDs, tenant IDs, and role assignments belong only in the
-internal deployment document.
+internal deployment document and overlay. Start from
+`deploy/signal/observability/overlay.example/`. The provider certification
+skill rejects overlays with placeholders, a missing `remote_write` block, a
+cluster label that differs from its cluster config, or no provider-label
+derivation.
 
 ## Internal deployment record
 

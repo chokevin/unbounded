@@ -1,0 +1,72 @@
+apiVersion: signal.unbounded-cloud.io/v1alpha1
+kind: CertificationPlan
+metadata:
+  name: project-signal-whole-node-24h
+  labels:
+    app.kubernetes.io/part-of: project-signal
+spec:
+  sourceRoot: .
+  owner: project-signal
+  version: v1
+  tests:
+    - name: project-signal-whole-node-burn-v1
+      displayName: Whole-node GPU burn
+      description: Runs a coupled GPU, CPU, memory, and storage integrity soak.
+      labels:
+        app.kubernetes.io/part-of: project-signal
+      tags:
+        - gpu
+        - whole-node
+        - endurance
+      parameters:
+        - name: environmentJson
+          displayName: Bounded burn configuration
+          type: String
+          required: true
+      metrics:
+        - name: scriptResult
+          displayName: Canonical script result
+          type: Status
+          required: true
+      topology:
+        minParticipants: 1
+        maxParticipants: 1
+      artifact:
+        name: gpu-burn-canary.sh
+        path: gpu-burn-canary.sh
+      driver:
+        type: WorkflowTemplate
+        workflowTemplate:
+          path: workflow-template.yaml
+          artifact: gpu-burn-canary.sh
+      security:
+        allowRoot: true
+        privileged: true
+        hostPaths:
+          - path: /var/lib/project-signal
+            mountPath: /var/lib/project-signal
+            readOnly: false
+  suite:
+    name: project-signal-whole-node-24h-v1
+    labels:
+      app.kubernetes.io/part-of: project-signal
+    phases:
+      - name: endurance
+        displayName: Whole-node endurance
+        role: Validation
+        stages:
+          - name: whole-node-burn
+            displayName: 24-hour coupled whole-node soak
+            test: project-signal-whole-node-burn-v1
+            schedule:
+              mode: RunOnce
+              invocationTimeout: 25h
+            retry:
+              maxAttempts: 1
+            assertions:
+              - name: canonical-script-pass
+                metric: scriptResult
+                operator: StatusEquals
+                expected:
+                  type: String
+                  stringValue: Pass

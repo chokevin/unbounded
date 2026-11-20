@@ -1,0 +1,490 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  labels:
+    app.kubernetes.io/part-of: project-signal
+  name: project-signal-whole-node-burn-v1
+spec:
+  arguments:
+    parameters:
+    - name: invocation-id
+    - name: run-uid
+    - name: plan-digest
+    - name: stage-id
+    - name: stage-order
+    - name: test-json
+    - name: parameters-json
+    - name: participants-json
+    - name: participant-roles-json
+    - name: primary-participant-node-name
+    - name: resolved-inputs-json
+    - name: result-configmap
+    - name: script-name
+    - name: script-content-b64
+    - name: script-digest
+  automountServiceAccountToken: true
+  entrypoint: execute
+  serviceAccountName: project-signal-adapter
+  templates:
+  - dag:
+      failFast: false
+      tasks:
+      - name: burn
+        template: burn
+      - arguments:
+          parameters:
+          - name: verdicts-json
+            value: '["{{=sprig.b64enc(tasks[''burn''].outputs.parameters[''verdict''])}}"]'
+          - name: reasons-json
+            value: '["{{=sprig.b64enc(tasks[''burn''].outputs.parameters[''reason''])}}"]'
+          - name: exit-codes-json
+            value: '["{{=sprig.b64enc(tasks[''burn''].outputs.parameters[''exit-code''])}}"]'
+          - name: backend-statuses-json
+            value: '[]'
+          - name: qualification-start-json
+            value: '{{=sprig.b64enc(tasks[''burn''].outputs.parameters[''qualification''])}}'
+          - name: qualification-end-json
+            value: '{{=sprig.b64enc(tasks[''burn''].outputs.parameters[''qualification''])}}'
+        depends: (burn.Succeeded || burn.Failed || burn.Errored)
+        name: publish
+        template: publish-result
+    name: execute
+  - containerSet:
+      containers:
+      - args:
+        - 'set +e
+        . /scripts/parameters.env
+          /scripts/gpu-burn-canary.sh gpu-burn
+
+          status=$?
+
+          printf ''%s'' "$status" > /results/gpu-burn-exit-code
+
+          exit 0
+
+          '
+        command:
+        - /bin/bash
+        - -c
+        env:
+        - name: PROJECT_SIGNAL_PARAMETERS_JSON
+          value: '{{workflow.parameters.parameters-json}}'
+        image: projectsignalpublic.azurecr.io/premerge/project-signal-certification-runner@sha256:73f80b8659abdabc656a2534f74b03dbf3e62b28e13b13072a43182c74266c14
+        imagePullPolicy: IfNotPresent
+        name: main
+        resources:
+          limits:
+            cpu: '4'
+            memory: 16Gi
+            nvidia.com/gpu: '8'
+          requests:
+            cpu: '2'
+            memory: 8Gi
+            nvidia.com/gpu: '8'
+        securityContext:
+          allowPrivilegeEscalation: true
+          privileged: true
+      - args:
+        - 'set +e
+        . /scripts/parameters.env
+          /scripts/gpu-burn-canary.sh cpu-stress
+
+          status=$?
+
+          printf ''%s'' "$status" > /results/cpu-stress-exit-code
+
+          exit 0
+
+          '
+        command:
+        - /bin/bash
+        - -c
+        env:
+        - name: PROJECT_SIGNAL_PARAMETERS_JSON
+          value: '{{workflow.parameters.parameters-json}}'
+        image: projectsignalpublic.azurecr.io/premerge/project-signal-certification-runner@sha256:73f80b8659abdabc656a2534f74b03dbf3e62b28e13b13072a43182c74266c14
+        imagePullPolicy: IfNotPresent
+        name: cpu-stress
+        resources:
+          limits:
+            cpu: '48'
+            memory: 16Gi
+          requests:
+            cpu: '24'
+            memory: 8Gi
+      - args:
+        - 'set +e
+        . /scripts/parameters.env
+          /scripts/gpu-burn-canary.sh memory-integrity
+
+          status=$?
+
+          printf ''%s'' "$status" > /results/memory-integrity-exit-code
+
+          exit 0
+
+          '
+        command:
+        - /bin/bash
+        - -c
+        env:
+        - name: PROJECT_SIGNAL_PARAMETERS_JSON
+          value: '{{workflow.parameters.parameters-json}}'
+        image: projectsignalpublic.azurecr.io/premerge/project-signal-certification-runner@sha256:73f80b8659abdabc656a2534f74b03dbf3e62b28e13b13072a43182c74266c14
+        imagePullPolicy: IfNotPresent
+        name: memory-integrity
+        resources:
+          limits:
+            cpu: '4'
+            memory: 80Gi
+          requests:
+            cpu: '2'
+            memory: 40Gi
+      - args:
+        - 'set +e
+        . /scripts/parameters.env
+          /scripts/gpu-burn-canary.sh storage-integrity
+
+          status=$?
+
+          printf ''%s'' "$status" > /results/storage-integrity-exit-code
+
+          exit 0
+
+          '
+        command:
+        - /bin/bash
+        - -c
+        env:
+        - name: PROJECT_SIGNAL_PARAMETERS_JSON
+          value: '{{workflow.parameters.parameters-json}}'
+        image: projectsignalpublic.azurecr.io/premerge/project-signal-certification-runner@sha256:73f80b8659abdabc656a2534f74b03dbf3e62b28e13b13072a43182c74266c14
+        imagePullPolicy: IfNotPresent
+        name: storage-integrity
+        resources:
+          limits:
+            cpu: '8'
+            memory: 16Gi
+          requests:
+            cpu: '4'
+            memory: 8Gi
+      volumeMounts:
+      - mountPath: /scripts
+        name: scripts
+        readOnly: true
+      - mountPath: /results
+        name: results
+      - mountPath: /work
+        name: work
+      - mountPath: /var/lib/project-signal
+        name: host-storage
+    initContainers:
+    - command:
+      - /bin/bash
+      - -c
+      - |
+        set -euo pipefail
+        case "${PROJECT_SIGNAL_SCRIPT_NAME}" in
+          ""|*/*|*..*)
+            echo "invalid script name" >&2
+            exit 1
+            ;;
+        esac
+        case "${PROJECT_SIGNAL_SCRIPT_DIGEST}" in
+          sha256:[0-9a-f][0-9a-f]*)
+            ;;
+          *)
+            echo "invalid script digest" >&2
+            exit 1
+            ;;
+        esac
+        target="/scripts/${PROJECT_SIGNAL_SCRIPT_NAME}"
+        printf '%s' "${PROJECT_SIGNAL_SCRIPT_CONTENT_B64}" | base64 -d > "${target}"
+        actual="sha256:$(sha256sum "${target}" | awk '{print $1}')"
+        if [ "${actual}" != "${PROJECT_SIGNAL_SCRIPT_DIGEST}" ]; then
+          echo "script digest mismatch" >&2
+          exit 1
+        fi
+        chmod 0555 "${target}"
+        python3 - /scripts/parameters.env <<'PY'
+        import json
+        import os
+        import pathlib
+        import shlex
+        import sys
+
+        allowed = {
+            "BURN_DURATION_SECONDS",
+            "CPU_WORKERS",
+            "EXPECTED_GPU_COUNT",
+            "EXPECTED_GPU_PRODUCT_REGEX",
+            "MEMORY_MIB",
+            "OBSERVED_GPU_ALLOCATABLE",
+            "OBSERVED_GPU_CAPACITY",
+            "POWER_LIMIT_CONSECUTIVE_SAMPLES",
+            "POWER_LIMIT_TOLERANCE_PERCENT",
+            "SAMPLE_INTERVAL_SECONDS",
+            "STORAGE_MIB",
+        }
+        parameters = json.loads(os.environ["PROJECT_SIGNAL_PARAMETERS_JSON"])
+        environment = None
+        for parameter in parameters:
+            if parameter.get("name") != "environmentJson":
+                continue
+            value = parameter.get("value", {})
+            if value.get("type") != "String":
+                raise SystemExit("environmentJson must be a String")
+            environment = json.loads(value["stringValue"])
+            break
+        if environment is None:
+            raise SystemExit("environmentJson is required")
+        unknown = set(environment) - allowed
+        missing = allowed - set(environment)
+        if unknown or missing:
+            raise SystemExit(
+                f"environmentJson keys mismatch: missing={sorted(missing)} unknown={sorted(unknown)}"
+            )
+        if not all(isinstance(value, str) for value in environment.values()):
+            raise SystemExit("environmentJson values must be strings")
+        output = "".join(
+            f"export {key}={shlex.quote(environment[key])}\n" for key in sorted(allowed)
+        )
+        pathlib.Path(sys.argv[1]).write_text(output, encoding="utf-8")
+        PY
+      env:
+      - name: PROJECT_SIGNAL_SCRIPT_NAME
+        value: '{{workflow.parameters.script-name}}'
+      - name: PROJECT_SIGNAL_SCRIPT_CONTENT_B64
+        value: '{{workflow.parameters.script-content-b64}}'
+      - name: PROJECT_SIGNAL_SCRIPT_DIGEST
+        value: '{{workflow.parameters.script-digest}}'
+      - name: PROJECT_SIGNAL_PARAMETERS_JSON
+        value: '{{workflow.parameters.parameters-json}}'
+      image: projectsignalpublic.azurecr.io/premerge/project-signal-certification-runner@sha256:73f80b8659abdabc656a2534f74b03dbf3e62b28e13b13072a43182c74266c14
+      imagePullPolicy: IfNotPresent
+      name: materialize-script
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi
+        requests:
+          cpu: 10m
+          memory: 16Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+      volumeMounts:
+      - mountPath: /scripts
+        name: scripts
+    name: burn
+    nodeSelector:
+      kubernetes.io/hostname: '{{workflow.parameters.primary-participant-node-name}}'
+    outputs:
+      parameters:
+      - name: verdict
+        valueFrom:
+          default: Inconclusive
+          path: /results/verdict
+      - name: reason
+        valueFrom:
+          default: MissingTestResult
+          path: /results/reason
+      - name: exit-code
+        valueFrom:
+          default: '2'
+          path: /results/gpu-burn-exit-code
+      - name: qualification
+        valueFrom:
+          default: '{}'
+          path: /results/qualification.json
+    tolerations:
+    - effect: NoSchedule
+      key: node.kubernetes.io/unschedulable
+      operator: Exists
+    volumes:
+    - emptyDir: {}
+      name: results
+    - emptyDir:
+        sizeLimit: 24Gi
+      name: work
+    - hostPath:
+        path: /var/lib/project-signal
+        type: DirectoryOrCreate
+      name: host-storage
+  - container:
+      args:
+      - "\nimport base64\nimport datetime\nimport hashlib\nimport json\nimport os\n\
+        import pathlib\nimport re\nimport ssl\nimport urllib.request\n\ndef load(name):\n\
+        \    return json.loads(os.environ[name])\n\ndef decode(name):\n    try:\n\
+        \        return base64.b64decode(\n            os.environ[name].encode(\"\
+        ascii\"),\n            validate=True,\n        ).decode(\"utf-8\")\n    except\
+        \ (UnicodeError, ValueError) as error:\n        raise SystemExit(\"invalid\
+        \ base64 publisher input: \" + name) from error\n\ndef load_encoded_list(name):\n\
+        \    values = load(name)\n    if not isinstance(values, list):\n        raise\
+        \ SystemExit(\"invalid publisher input list: \" + name)\n    decoded = []\n\
+        \    for value in values:\n        if not isinstance(value, str):\n      \
+        \      raise SystemExit(\"invalid publisher input value: \" + name)\n    \
+        \    try:\n            decoded.append(\n                base64.b64decode(value.encode(\"\
+        ascii\"), validate=True).decode(\"utf-8\")\n            )\n        except\
+        \ (UnicodeError, ValueError) as error:\n            raise SystemExit(\"invalid\
+        \ base64 publisher input: \" + name) from error\n    return decoded\n\ndef\
+        \ qualification(name):\n    try:\n        value = json.loads(decode(name))\n\
+        \    except json.JSONDecodeError as error:\n        raise SystemExit(\"invalid\
+        \ qualification JSON\") from error\n    if not isinstance(value, dict) or\
+        \ set(value) != {\n        \"driverVersion\",\n        \"gpuInventoryDigest\"\
+        ,\n        \"visibleDevices\",\n        \"coveredDevices\",\n    }:\n    \
+        \    raise SystemExit(\"invalid qualification fingerprint\")\n    driver =\
+        \ value[\"driverVersion\"]\n    digest = value[\"gpuInventoryDigest\"]\n \
+        \   visible = value[\"visibleDevices\"]\n    covered = value[\"coveredDevices\"\
+        ]\n    if (\n        not isinstance(driver, str)\n        or not 1 <= len(driver.encode())\
+        \ <= 128\n        or not re.fullmatch(r\"[A-Za-z0-9._+-]+\", driver)\n   \
+        \     or not isinstance(digest, str)\n        or not re.fullmatch(r\"sha256:[0-9a-f]{64}\"\
+        , digest)\n        or not isinstance(visible, list)\n        or not isinstance(covered,\
+        \ list)\n        or not visible\n        or visible != covered\n        or\
+        \ visible != [\"gpu-index-\" + str(index) for index in range(len(visible))]\n\
+        \    ):\n        raise SystemExit(\"invalid qualification fingerprint\")\n\
+        \    return value\n\nverdicts = load_encoded_list(\"RESULT_VERDICTS_JSON\"\
+        )\nreasons = load_encoded_list(\"RESULT_REASONS_JSON\")\nexit_codes = [int(value)\
+        \ for value in load_encoded_list(\"RESULT_EXIT_CODES_JSON\")]\nbackend_statuses\
+        \ = load_encoded_list(\"BACKEND_STATUSES_JSON\")\nqualification_start = qualification(\"\
+        QUALIFICATION_START_JSON\")\nqualification_end = qualification(\"QUALIFICATION_END_JSON\"\
+        )\nif qualification_start != qualification_end:\n    raise SystemExit(\"qualification\
+        \ fingerprint changed during workflow\")\nif len(verdicts) != len(reasons)\
+        \ or len(verdicts) != len(exit_codes) or not verdicts:\n    raise SystemExit(\"\
+        invalid result aggregation inputs\")\nif any(value not in (\"Pass\", \"Fail\"\
+        , \"Inconclusive\") for value in verdicts):\n    raise SystemExit(\"invalid\
+        \ script verdict\")\nif any(status != \"Succeeded\" for status in backend_statuses):\n\
+        \    verdict = \"Inconclusive\"\n    reason = \"BackendExecutionIncomplete\"\
+        \n    exit_code = 2\nelif \"Fail\" in verdicts:\n    index = verdicts.index(\"\
+        Fail\")\n    verdict = \"Fail\"\n    reason = reasons[index]\n    exit_code\
+        \ = 1\nelif \"Inconclusive\" in verdicts:\n    index = verdicts.index(\"Inconclusive\"\
+        )\n    verdict = \"Inconclusive\"\n    reason = reasons[index]\n    exit_code\
+        \ = 2\nelse:\n    verdict = \"Pass\"\n    reason = reasons[-1]\n    exit_code\
+        \ = 0\n\ntest = load(\"TEST_JSON\")\nidentity = test.get(\"identity\")\nif\
+        \ not isinstance(identity, dict):\n    raise SystemExit(\"resolved test identity\
+        \ is missing\")\nparticipants = load(\"PARTICIPANTS_JSON\")\nroles = load(\"\
+        PARTICIPANT_ROLES_JSON\")\nresolved_inputs = load(\"RESOLVED_INPUTS_JSON\"\
+        )\nif not isinstance(participants, list) or not 1 <= len(participants) <=\
+        \ 8:\n    raise SystemExit(\"participants must contain between 1 and 8 entries\"\
+        )\nif not isinstance(roles, dict) or set(roles) != {\n    str(index) for index\
+        \ in range(len(participants))\n}:\n    raise SystemExit(\"participant roles\
+        \ must exactly cover participant positions\")\noutcome = {\"Pass\": \"Passed\"\
+        , \"Fail\": \"Failed\", \"Inconclusive\": \"Inconclusive\"}[verdict]\nreason_code\
+        \ = {\n    \"Pass\": \"Completed\",\n    \"Fail\": \"AssertionFailed\",\n\
+        \    \"Inconclusive\": \"InvalidResult\",\n}[verdict]\nparticipant_results\
+        \ = []\nnode_names = set()\nnode_uids = set()\nfor index, participant in enumerate(participants):\n\
+        \    if not isinstance(participant, dict) or set(participant) != {\"nodeName\"\
+        , \"nodeUID\"}:\n        raise SystemExit(\"participant must contain exactly\
+        \ nodeName and nodeUID\")\n    node_name = participant[\"nodeName\"]\n   \
+        \ node_uid = participant[\"nodeUID\"]\n    role = roles[str(index)]\n    if\
+        \ (\n        not isinstance(node_name, str)\n        or not 1 <= len(node_name)\
+        \ <= 253\n        or not re.fullmatch(\n            r\"[a-z0-9]([-a-z0-9]*[a-z0-9])?\"\
+        \n            r\"(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\",\n            node_name,\n\
+        \        )\n        or node_name in node_names\n        or not isinstance(node_uid,\
+        \ str)\n        or not node_uid\n        or node_uid in node_uids\n      \
+        \  or not isinstance(role, str)\n        or not 1 <= len(role) <= 63\n   \
+        \ ):\n        raise SystemExit(\"invalid participant identity or role\")\n\
+        \    node_names.add(node_name)\n    node_uids.add(node_uid)\n    start_fingerprint\
+        \ = {\"nodeUID\": node_uid, **qualification_start}\n    end_fingerprint =\
+        \ {\"nodeUID\": node_uid, **qualification_end}\n    participant_results.append({\n\
+        \        \"index\": index,\n        \"role\": role,\n        \"outcome\":\
+        \ outcome,\n        \"start\": start_fingerprint,\n        \"end\": end_fingerprint,\n\
+        \    })\nnow = datetime.datetime.now(datetime.timezone.utc).isoformat().replace(\"\
+        +00:00\", \"Z\")\nsequence = json.dumps(\n    {\"verdicts\": verdicts, \"\
+        reasons\": reasons, \"backendStatuses\": backend_statuses},\n    sort_keys=True,\n\
+        \    separators=(\",\", \":\"),\n).encode()\nenvelope = {\n    \"schemaVersion\"\
+        : \"signal.unbounded-cloud.io/invocation-result/v1\",\n    \"invocationID\"\
+        : os.environ[\"INVOCATION_ID\"],\n    \"runUID\": os.environ[\"RUN_UID\"],\n\
+        \    \"stageID\": os.environ[\"STAGE_ID\"],\n    \"stageOrder\": int(os.environ[\"\
+        STAGE_ORDER\"]),\n    \"planDigest\": os.environ[\"PLAN_DIGEST\"],\n    \"\
+        test\": identity,\n    \"resolvedInputs\": resolved_inputs,\n    \"startedAt\"\
+        : now,\n    \"finishedAt\": now,\n    \"monotonicDuration\": \"0s\",\n   \
+        \ \"outcome\": outcome,\n    \"reasonCode\": reason_code,\n    \"message\"\
+        : reason[:1024],\n    \"exitCode\": exit_code,\n    \"measurements\": [{\n\
+        \        \"name\": \"scriptResult\",\n        \"value\": {\"type\": \"String\"\
+        , \"stringValue\": verdict},\n    }],\n    \"participants\": participant_results,\n\
+        \    \"activity\": {\n        \"sampleCount\": 1,\n        \"sampleSequenceDigest\"\
+        : \"sha256:\" + hashlib.sha256(sequence).hexdigest(),\n    },\n    \"cleanup\"\
+        : {\"outcome\": \"Succeeded\"},\n}\ncontent = json.dumps(envelope, sort_keys=True,\
+        \ separators=(\",\", \":\")).encode()\nnamespace = pathlib.Path(\n    \"/var/run/secrets/kubernetes.io/serviceaccount/namespace\"\
+        \n).read_text(encoding=\"utf-8\").strip()\ntoken = pathlib.Path(\n    \"/var/run/secrets/kubernetes.io/serviceaccount/token\"\
+        \n).read_text(encoding=\"utf-8\").strip()\nbody = json.dumps({\n    \"apiVersion\"\
+        : \"v1\",\n    \"kind\": \"ConfigMap\",\n    \"metadata\": {\n        \"name\"\
+        : os.environ[\"RESULT_CONFIGMAP\"],\n        \"namespace\": namespace,\n \
+        \   },\n    \"immutable\": True,\n    \"binaryData\": {\"result.json\": base64.b64encode(content).decode(\"\
+        ascii\")},\n}, sort_keys=True, separators=(\",\", \":\")).encode()\nrequest\
+        \ = urllib.request.Request(\n    \"https://kubernetes.default.svc/api/v1/namespaces/\"\
+        \n    + namespace\n    + \"/configmaps\",\n    data=body,\n    headers={\n\
+        \        \"Authorization\": \"Bearer \" + token,\n        \"Content-Type\"\
+        : \"application/json\",\n    },\n    method=\"POST\",\n)\ncontext = ssl.create_default_context(\n\
+        \    cafile=\"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\"\n)\n\
+        with urllib.request.urlopen(request, context=context, timeout=30) as response:\n\
+        \    if response.status != 201:\n        raise SystemExit(\"result ConfigMap\
+        \ creation failed\")\n"
+      command:
+      - python3
+      - -c
+      env:
+      - name: INVOCATION_ID
+        value: '{{workflow.parameters.invocation-id}}'
+      - name: RUN_UID
+        value: '{{workflow.parameters.run-uid}}'
+      - name: PLAN_DIGEST
+        value: '{{workflow.parameters.plan-digest}}'
+      - name: STAGE_ID
+        value: '{{workflow.parameters.stage-id}}'
+      - name: STAGE_ORDER
+        value: '{{workflow.parameters.stage-order}}'
+      - name: TEST_JSON
+        value: '{{workflow.parameters.test-json}}'
+      - name: PARTICIPANTS_JSON
+        value: '{{workflow.parameters.participants-json}}'
+      - name: PARTICIPANT_ROLES_JSON
+        value: '{{workflow.parameters.participant-roles-json}}'
+      - name: RESOLVED_INPUTS_JSON
+        value: '{{workflow.parameters.resolved-inputs-json}}'
+      - name: RESULT_CONFIGMAP
+        value: '{{workflow.parameters.result-configmap}}'
+      - name: RESULT_VERDICTS_JSON
+        value: '{{inputs.parameters.verdicts-json}}'
+      - name: RESULT_REASONS_JSON
+        value: '{{inputs.parameters.reasons-json}}'
+      - name: RESULT_EXIT_CODES_JSON
+        value: '{{inputs.parameters.exit-codes-json}}'
+      - name: BACKEND_STATUSES_JSON
+        value: '{{inputs.parameters.backend-statuses-json}}'
+      - name: QUALIFICATION_START_JSON
+        value: '{{inputs.parameters.qualification-start-json}}'
+      - name: QUALIFICATION_END_JSON
+        value: '{{inputs.parameters.qualification-end-json}}'
+      image: projectsignalpublic.azurecr.io/premerge/project-signal-certification-runner@sha256:73f80b8659abdabc656a2534f74b03dbf3e62b28e13b13072a43182c74266c14
+      imagePullPolicy: IfNotPresent
+      resources:
+        limits:
+          cpu: 500m
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 128Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+    inputs:
+      parameters:
+      - name: verdicts-json
+      - name: reasons-json
+      - name: exit-codes-json
+      - default: '[]'
+        name: backend-statuses-json
+      - name: qualification-start-json
+      - name: qualification-end-json
+    name: publish-result
+  volumes:
+  - emptyDir: {}
+    name: scripts
