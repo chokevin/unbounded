@@ -452,6 +452,17 @@ trap 'verdict=Inconclusive; reason=Canceled; exit 2' TERM INT
 
 emit_stage preflight running
 
+if [[ "${component}" == gpu-burn &&
+      "${EXPECTED_GPU_COUNT:-}" =~ ^[1-9][0-9]*$ ]] &&
+  command -v nvidia-smi >/dev/null 2>&1; then
+  if ! nvidia-smi --query-gpu=index,uuid,pci.bus_id,name \
+    --format=csv,noheader > /results/devices.txt; then
+    fail DeviceIdentityUnavailable "Cannot retain assigned GPU identities"
+  elif ! write_qualification_fingerprint; then
+    :
+  fi
+fi
+
 if ! [[ "${EXPECTED_GPU_COUNT:-}" =~ ^[1-9][0-9]*$ &&
         "${BURN_DURATION_SECONDS:-}" =~ ^[1-9][0-9]*$ &&
         "${SAMPLE_INTERVAL_SECONDS:-}" =~ ^[1-9][0-9]*$ &&
@@ -477,14 +488,6 @@ else
     fail XidTelemetryUnavailable "Cannot capture baseline kernel Xid telemetry"
   fi
   capture_telemetry baseline || true
-  if [[ "${component}" == gpu-burn ]]; then
-    if ! nvidia-smi --query-gpu=index,uuid,pci.bus_id,name \
-      --format=csv,noheader > /results/devices.txt; then
-      fail DeviceIdentityUnavailable "Cannot retain assigned GPU identities"
-    elif ! write_qualification_fingerprint; then
-      :
-    fi
-  fi
 fi
 
 if [[ "${verdict}" != Pass ]]; then
