@@ -928,29 +928,82 @@ wait_for_smoke() {
 
 cancel_runs_for_policy() {
   local policy_name="$1"
-  local campaigns runs_json run phase
+  local campaigns deadline runs_json run phase
   campaigns="$(
     kube -n "${namespace}" get certificationcampaigns -o json |
       jq -c --arg policy "${policy_name}" \
         '[.items[] | select(.spec.policy.name == $policy) | .metadata.name]'
   )"
-  runs_json="$(kube -n "${namespace}" get certificationruns -o json)"
 
-  while IFS=$'\t' read -r run phase; do
-    [[ -n "${run}" ]] || continue
-    if [[ ! "${phase}" =~ ^(Succeeded|Failed|Inconclusive|Canceled)$ ]]; then
-      kube -n "${namespace}" patch certificationrun "${run}" \
-        --type=merge -p '{"spec":{"cancel":true}}'
+  while IFS= read -r campaign; do
+    [[ -n "${campaign}" ]] || continue
+    kube -n "${namespace}" delete certificationcampaign "${campaign}" \
+      --ignore-not-found --wait=true
+  done < <(jq -r '.[]' <<<"${campaigns}")
+  kube delete certificationcampaignpolicy "${policy_name}" \
+    --ignore-not-found --wait=true
+
+  deadline=$((SECONDS + 900))
+  while ((SECONDS < deadline)); do
+    runs_json="$(kube -n "${namespace}" get certificationruns -o json)"
+    while IFS=$'\t' read -r run phase; do
+      [[ -n "${run}" ]] || continue
+      if [[ ! "${phase}" =~ ^(Succeeded|Failed|Inconclusive|Canceled)$ ]]; then
+        kube -n "${namespace}" patch certificationrun "${run}" \
+          --type=merge -p '{"spec":{"cancel":true}}'
+      fi
+    done < <(
+      jq -r --argjson campaigns "${campaigns}" '
+        .items[] |
+        . as $run |
+        select($campaigns | index($run.metadata.labels["signal.unbounded-cloud.io/campaign"])) |
+        [.metadata.name, (.status.phase // "")] |
+        @tsv
+      ' <<<"${runs_json}"
+    )
+    if jq -e --argjson campaigns "${campaigns}" '
+      all(
+        .items[] |
+        . as $run |
+        select($campaigns | index($run.metadata.labels["signal.unbounded-cloud.io/campaign"]));
+        (.status.phase // "") | test("^(Succeeded|Failed|Inconclusive|Canceled)$")
+      )
+    ' <<<"${runs_json}" >/dev/null; then
+      break
     fi
+    sleep 5
+  done
+
+  while IFS= read -r run; do
+    [[ -n "${run}" ]] || continue
+    kube -n "${namespace}" patch certificationrun "${run}" \
+      --type=merge -p '{"spec":{"release":true}}'
   done < <(
     jq -r --argjson campaigns "${campaigns}" '
       .items[] |
       . as $run |
       select($campaigns | index($run.metadata.labels["signal.unbounded-cloud.io/campaign"])) |
-      [.metadata.name, (.status.phase // "")] |
-      @tsv
+      .metadata.name
     ' <<<"${runs_json}"
   )
+
+  deadline=$((SECONDS + 900))
+  while ((SECONDS < deadline)); do
+    runs_json="$(kube -n "${namespace}" get certificationruns -o json)"
+    if jq -e --argjson campaigns "${campaigns}" '
+      [
+        .items[] |
+        . as $run |
+        select($campaigns | index($run.metadata.labels["signal.unbounded-cloud.io/campaign"]))
+      ] as $runs |
+      ($runs | length) > 0 and
+      all($runs[]; any(.status.conditions[]?; .type == "Released" and .status == "True"))
+    ' <<<"${runs_json}" >/dev/null; then
+      return
+    fi
+    sleep 5
+  done
+  fail "smoke cleanup did not release all provider Nodes within 15 minutes"
 }
 
 run_mode() {
