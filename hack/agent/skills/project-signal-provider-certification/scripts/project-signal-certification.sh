@@ -87,9 +87,10 @@ remote_exec_retry() {
   for attempt in 1 2 3; do
     if remote_exec "$@"; then
       return
+    else
+      status=$?
     fi
 
-    status=$?
     if [[ "${status}" != "255" || "${attempt}" == "3" ]]; then
       return "${status}"
     fi
