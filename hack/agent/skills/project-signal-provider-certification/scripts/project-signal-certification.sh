@@ -1185,7 +1185,6 @@ uninstall_all() {
   done
 
   kube_delete_file "${WORK_DIR}/metrics-overlay.yaml" || true
-  kube_delete_directory "${RENDERED_DIR}"
   if [[ -n "${REMOTE_HOST:-}" ]]; then
     remote_exec helm uninstall project-signal-argo \
       --kube-context "${CONTEXT}" \
@@ -1197,6 +1196,7 @@ uninstall_all() {
       --namespace "${namespace}" \
       --wait || true
   fi
+  kube_delete_directory "${RENDERED_DIR}"
   clean_node_markers
   kube delete namespace "${namespace}" "${authority_namespace}" \
     --ignore-not-found --wait

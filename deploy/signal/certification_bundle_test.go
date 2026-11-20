@@ -612,6 +612,16 @@ func TestProviderCertificationUninstallStopsCampaignsBeforeRuns(t *testing.T) {
 	if deleteCampaigns > cancelRuns {
 		t.Fatal("uninstall can let an active Campaign replace a canceled Run")
 	}
+
+	uninstallArgo := strings.Index(uninstall, "helm uninstall project-signal-argo")
+	deleteRuntime := strings.Index(uninstall, `kube_delete_directory "${RENDERED_DIR}"`)
+	if uninstallArgo == -1 || deleteRuntime == -1 {
+		t.Fatal("uninstall Argo or runtime cleanup step not found")
+	}
+
+	if uninstallArgo > deleteRuntime {
+		t.Fatal("uninstall deletes Helm release metadata before uninstalling Argo")
+	}
 }
 
 func TestProviderCertificationAuthorityUsesImageSourceCommit(t *testing.T) {
