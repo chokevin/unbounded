@@ -275,6 +275,7 @@ preflight_context() {
 
 preflight_nodes() {
   local nodes_json="${WORK_DIR}/nodes.json"
+  local machines_json="${WORK_DIR}/machines.json"
   local pods_json="${WORK_DIR}/pods.json"
   kube get nodes -l "${SELECTOR}" -o json >"${nodes_json}"
 
@@ -283,6 +284,35 @@ preflight_nodes() {
   [[ "${count}" -gt 0 ]] ||
     fail "selector ${SELECTOR} did not match any provider Nodes"
   EXPECTED_NODES="${count}"
+
+  kube get machines -o json >"${machines_json}"
+  local isolation_violations
+  isolation_violations="$(
+    jq -r --slurpfile nodes "${nodes_json}" '
+      .items as $machines |
+      $nodes[0].items[].metadata.name as $node |
+      [
+        $machines[] |
+        select((.spec.kubernetes.nodeRef.name // .metadata.name) == $node)
+      ] as $matches |
+      select(
+        ($matches | length) != 1 or
+        ($matches[0].status.isolation // "") != "none"
+      ) |
+      if ($matches | length) == 0 then
+        "\($node): Machine not found"
+      elif ($matches | length) > 1 then
+        "\($node): multiple Machines found"
+      else
+        "\($node): Machine \($matches[0].metadata.name) reports isolation=\($matches[0].status.isolation // "unset")"
+      end
+    ' "${machines_json}"
+  )"
+  if [[ -n "${isolation_violations}" ]]; then
+    printf 'error: certification requires every selected Machine to report status.isolation=none\n' >&2
+    printf '%s\n' "${isolation_violations}" >&2
+    exit 1
+  fi
 
   local violations
   violations="$(

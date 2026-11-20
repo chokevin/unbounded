@@ -35,6 +35,7 @@ Public configuration includes:
 - exact source commit embedded in the controller and adapter images;
 - provider Node selector;
 - canonical provider label key;
+- selected Machines with `status.isolation: none`;
 - expected GPU count and product;
 - bounded CPU, memory, storage, and sampling settings;
 - immutable controller and adapter images.
@@ -84,7 +85,8 @@ config=/secure/path/provider-certification.yaml
 
 `start` is the normal clean-cluster path. Each phase discovers the complete
 Node population matching the provider selector. It stops before the 24-hour
-launch if any selected Node is unhealthy, unschedulable, missing its provider
+launch if any selected Node is not backed by exactly one Machine reporting
+`status.isolation: none`, is unhealthy, unschedulable, missing its provider
 label, does not expose the expected GPU inventory, or has an active Pod
 requesting GPUs; if the smoke fails; if
 the cluster label is generic or mismatched; or if remote-write reports

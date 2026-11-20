@@ -111,6 +111,18 @@ case "$*" in
 ]}
 EOF
     ;;
+  *" get machines -o json")
+    if [[ "${MOCK_MISSING_MACHINE:-false}" == "true" ]]; then
+      printf '{"items":[]}\n'
+      exit
+    fi
+    cat <<EOF
+{"items":[
+  {"metadata":{"name":"provider-machine-a"},"spec":{"kubernetes":{"nodeRef":{"name":"provider-node-a"}}},"status":{"isolation":"${MOCK_ISOLATION_MODE:-none}"}},
+  {"metadata":{"name":"provider-machine-b"},"spec":{"kubernetes":{"nodeRef":{"name":"provider-node-b"}}},"status":{"isolation":"${MOCK_ISOLATION_MODE:-none}"}}
+]}
+EOF
+    ;;
   *" get pods -A -o json")
     if [[ "${MOCK_ACTIVE_GPU_WORKLOAD:-false}" == "true" ]]; then
       cat <<'EOF'
@@ -213,6 +225,36 @@ spec:
 	}
 	if !strings.Contains(string(output), "provider Nodes have active GPU workloads") {
 		t.Fatalf("active GPU workload failure is unclear:\n%s", output)
+	}
+
+	command = exec.Command(script, "preflight", configPath)
+	command.Dir = repoRoot
+	command.Env = append(
+		os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"MOCK_ISOLATION_MODE=nspawn",
+	)
+	output, err = command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("preflight unexpectedly accepted nspawn isolation:\n%s", output)
+	}
+	if !strings.Contains(string(output), "status.isolation=none") {
+		t.Fatalf("nspawn isolation failure is unclear:\n%s", output)
+	}
+
+	command = exec.Command(script, "preflight", configPath)
+	command.Dir = repoRoot
+	command.Env = append(
+		os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"MOCK_MISSING_MACHINE=true",
+	)
+	output, err = command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("preflight unexpectedly accepted a Node without a Machine:\n%s", output)
+	}
+	if !strings.Contains(string(output), "Machine not found") {
+		t.Fatalf("missing Machine failure is unclear:\n%s", output)
 	}
 }
 
