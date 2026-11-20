@@ -50,6 +50,9 @@ remain local; the skill sends manifests over standard input and runs only
 `kubectl`, Helm, `jq`, `curl`, and `awk` on the jumpbox. No repository checkout
 or Go toolchain is required there.
 
+The configured `spec.context` is always passed explicitly to Kubernetes and
+Helm commands. The kubeconfig's current context may point somewhere else.
+
 ## Commands
 
 ```bash

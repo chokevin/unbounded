@@ -93,7 +93,8 @@ set -euo pipefail
 
 case "$*" in
   *"config current-context")
-    printf 'test-context\n'
+    printf 'preflight must not depend on the current context\n' >&2
+    exit 42
     ;;
   *" version --request-timeout=15s")
     printf 'ok\n'

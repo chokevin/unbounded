@@ -260,10 +260,6 @@ preflight_config() {
 }
 
 preflight_context() {
-  local current_context
-  current_context="$(kube config current-context)"
-  [[ "${current_context}" == "${CONTEXT}" ]] ||
-    fail "kubectl resolved context ${current_context}, expected ${CONTEXT}"
   kube version --request-timeout=15s >/dev/null
 }
 
