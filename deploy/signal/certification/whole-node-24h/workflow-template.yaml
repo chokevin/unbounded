@@ -395,6 +395,8 @@ spec:
         \ {\"nodeUID\": node_uid, **qualification_end}\n    participant_results.append({\n\
         \        \"index\": index,\n        \"role\": role,\n        \"outcome\":\
         \ outcome,\n        \"start\": start_fingerprint,\n        \"end\": end_fingerprint,\n\
+        \        \"visibleDevices\": qualification_start[\"visibleDevices\"],\n    \
+        \    \"coveredDevices\": qualification_start[\"coveredDevices\"],\n\
         \    })\nnow = datetime.datetime.now(datetime.timezone.utc).isoformat().replace(\"\
         +00:00\", \"Z\")\nsequence = json.dumps(\n    {\"verdicts\": verdicts, \"\
         reasons\": reasons, \"backendStatuses\": backend_statuses},\n    sort_keys=True,\n\

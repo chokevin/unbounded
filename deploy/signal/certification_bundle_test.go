@@ -56,6 +56,7 @@ func TestWholeNodeCertificationBundle(t *testing.T) {
 	test := findCertificationObject(t, objects, "CertificationTest", "project-signal-whole-node-burn-v1")
 
 	assertWorkflowArtifactMaterialization(t, workflow)
+	assertWorkflowQualificationPublishing(t, workflow)
 	assertTestArtifactDigest(t, test)
 
 	materializer := workflowMaterializerCommand(t, workflow)
@@ -828,6 +829,46 @@ func workflowMaterializerCommand(t *testing.T, workflow unstructured.Unstructure
 	t.Fatal("burn template not found")
 
 	return ""
+}
+
+func assertWorkflowQualificationPublishing(t *testing.T, workflow unstructured.Unstructured) {
+	t.Helper()
+
+	templates, found, err := unstructured.NestedSlice(workflow.Object, "spec", "templates")
+	if err != nil || !found {
+		t.Fatalf("read WorkflowTemplate templates: found=%v err=%v", found, err)
+	}
+
+	for index := range templates {
+		template, ok := templates[index].(map[string]any)
+		if !ok || template["name"] != "publish-result" {
+			continue
+		}
+
+		container, ok := template["container"].(map[string]any)
+		if !ok {
+			t.Fatalf("publish-result container = %#v", template["container"])
+		}
+
+		args, ok := container["args"].([]any)
+		if !ok || len(args) != 1 {
+			t.Fatalf("publish-result args = %#v", container["args"])
+		}
+
+		script, _ := args[0].(string)
+		for _, required := range []string{
+			`"visibleDevices": qualification_start["visibleDevices"]`,
+			`"coveredDevices": qualification_start["coveredDevices"]`,
+		} {
+			if !strings.Contains(script, required) {
+				t.Fatalf("publisher does not copy participant qualification field %s", required)
+			}
+		}
+
+		return
+	}
+
+	t.Fatal("publish-result template not found")
 }
 
 func testMaterializer(t *testing.T, materializer string) {
