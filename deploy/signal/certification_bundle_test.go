@@ -477,6 +477,17 @@ func TestProviderCertificationVerifiesControllerSourceCommit(t *testing.T) {
 		repoRoot,
 		"hack/agent/skills/project-signal-provider-certification/scripts/project-signal-certification.sh",
 	)
+	source, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(
+		string(source),
+		"install_signal_runtime\n  verify_controller_source_commit\n  install_execution_authority",
+	) {
+		t.Fatal("install does not verify controller provenance before creating execution authority")
+	}
+
 	expected := strings.Repeat("a", 40)
 
 	command := exec.Command(
